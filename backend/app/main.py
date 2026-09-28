@@ -25,6 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .db import init_db, session_scope
+from .crypto import decrypt_str, encrypt_str
 from .models import Host, Job, Playbook, Template
 from .runner_service import run_playbook, syntax_check_playbook
 
@@ -150,7 +151,7 @@ def add_host(h: HostIn):
     hid = uuid.uuid4().hex[:8]
     with session_scope() as s:
         s.add(Host(id=hid, name=h.name, address=h.address, port=h.port,
-                   username=h.username, private_key=h.private_key,
+                   username=h.username, private_key=encrypt_str(h.private_key),
                    host_key=host_key, added_at=time.time()))
     return {"id": hid, "name": h.name, "address": h.address}
 
@@ -300,7 +301,8 @@ def create_job(j: JobIn):
             }
         host_rows = s.query(Host).filter(Host.id.in_(snapshot["host_ids"])).all()
         job_hosts = [{"name": h.name, "address": h.address, "port": h.port,
-                      "username": h.username, "private_key": h.private_key,
+                      "username": h.username,
+                      "private_key": decrypt_str(h.private_key),
                       "host_key": h.host_key} for h in host_rows]
         jid = uuid.uuid4().hex[:8]
         s.add(Job(id=jid, host_ids=snapshot["host_ids"], status="running",

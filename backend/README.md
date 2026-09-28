@@ -59,6 +59,8 @@ late WebSocket joiners get the full replay from the database.
 ## Security design (done)
 
 - SSH private keys are written to a 600 temp file only for the duration of a run, then deleted
+- Private keys are encrypted at rest (Fernet) in the database; key from `ENCRYPTION_KEY`
+  (dev: auto-generated to `.encryption_key`; production: inject via a secret manager, M7)
 - Host key verification: `StrictHostKeyChecking=yes` + known_hosts from the keyscan taken at host-adding time; never blindly trusted
 
 ## To be replaced (skeleton simplifications)
@@ -66,4 +68,4 @@ late WebSocket joiners get the full replay from the database.
 - ~~in-memory dicts → PostgreSQL~~ **done**: SQLAlchemy; PostgreSQL in compose, SQLite file for local dev
 - threading → Celery + Redis (long jobs, retry, cancel)
 - no auth → login + RBAC
-- private key in DB cleartext → Vault-encrypted at rest (M7)
+- ~~private key in DB cleartext → Vault-encrypted at rest (M7)~~ **done (skeleton)**: Fernet-encrypted at rest, key from `ENCRYPTION_KEY`; Vault/KMS integration is the M7 step

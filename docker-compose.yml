@@ -13,6 +13,8 @@ services:
     build: ./backend
     environment:
       DATABASE_URL: postgresql://ansible_gui:ansible_gui@postgres:5432/ansible_gui
+      # skeleton dev key; production must inject this from a secret manager (M7)
+      ENCRYPTION_KEY: PPdr9t6K2PHDNDuctrDgSR0ZhW3I1QotZiVnFNFuvyc=
     expose:
       - "8000"
     ports:

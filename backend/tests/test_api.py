@@ -98,6 +98,23 @@ def test_list_hosts_does_not_leak_private_key(client):
     assert "private_key" not in hosts[0]
 
 
+def test_private_key_is_encrypted_at_rest(client):
+    _add_host(client)
+    with session_scope() as s:
+        stored = s.query(Host).one().private_key
+    assert stored != "FAKE-KEY"          # not plaintext in the DB
+    assert stored.startswith("gAAAAA")   # Fernet token
+    # ...but a launched job still gets the real key back
+    from app.crypto import decrypt_str
+    assert decrypt_str(stored) == "FAKE-KEY"
+
+
+def test_legacy_plaintext_key_still_decrypts(client):
+    # rows written before encryption existed keep working (migrated on next write)
+    from app.crypto import decrypt_str
+    assert decrypt_str("FAKE-KEY") == "FAKE-KEY"
+
+
 def test_data_survives_across_api_calls(client):
     # regression test for the old in-memory dicts: data must persist
     hid = _add_host(client, name="persist")
