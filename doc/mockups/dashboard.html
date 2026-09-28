@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ansible GUI — 總覽儀表板（設計稿 v1）</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  :root {
+    --bg:#0b0e14; --panel:#12161f; --panel2:#171c28; --border:#232a3a;
+    --text:#e6e9f0; --muted:#8b93a7; --faint:#5b6378;
+    --green:#3fb950; --amber:#d29922; --red:#f85149; --blue:#58a6ff; --purple:#bc8cff;
+  }
+  body { background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft JhengHei",sans-serif;
+    font-size:13px; }
+  .app { display:flex; min-height:100vh; }
+
+  /* ---- sidebar ---- */
+  .sidebar { width:208px; background:#0d1017; border-right:1px solid var(--border);
+    padding:18px 12px; flex-shrink:0; position:sticky; top:0; height:100vh; }
+  .logo { display:flex; align-items:center; gap:10px; padding:4px 8px 18px; }
+  .logo-mark { width:32px; height:32px; border-radius:8px;
+    background:linear-gradient(135deg,#e6355f,#7a3ff2); display:flex; align-items:center;
+    justify-content:center; font-weight:800; font-size:16px; color:#fff; }
+  .logo b { font-size:14px; display:block; } .logo span { font-size:11px; color:var(--muted); }
+  .nav-sec { font-size:11px; color:var(--faint); padding:12px 10px 6px; letter-spacing:.08em; }
+  .nav a { display:flex; align-items:center; gap:10px; padding:9px 10px; border-radius:8px;
+    color:var(--muted); text-decoration:none; font-size:13px; }
+  .nav a:hover { background:var(--panel2); color:var(--text); }
+  .nav a.active { background:#1b2740; color:#fff; }
+  .nav a.active .ico { color:var(--blue); }
+  .ico { width:18px; text-align:center; }
+  .badge-n { margin-left:auto; background:#2a3350; color:#bcd; font-size:11px;
+    padding:1px 7px; border-radius:10px; }
+
+  /* ---- main ---- */
+  .main { flex:1; padding:20px 24px 40px; min-width:0; }
+  .topbar { display:flex; align-items:center; gap:12px; margin-bottom:18px; }
+  .cluster-pick { background:var(--panel); border:1px solid var(--border); color:var(--text);
+    border-radius:8px; padding:8px 12px; font-size:13px; }
+  .search { flex:1; max-width:340px; background:var(--panel); border:1px solid var(--border);
+    border-radius:8px; padding:8px 12px; color:var(--muted); }
+  .topbar .sp { flex:1; }
+  .bell { position:relative; background:var(--panel); border:1px solid var(--border);
+    border-radius:8px; width:36px; height:36px; display:flex; align-items:center;
+    justify-content:center; font-size:16px; }
+  .bell .dot { position:absolute; top:7px; right:8px; width:8px; height:8px;
+    background:var(--red); border-radius:50%; }
+  .avatar { width:36px; height:36px; border-radius:50%; background:#2a3350;
+    display:flex; align-items:center; justify-content:center; font-weight:700; }
+
+  h1 { font-size:18px; margin-bottom:4px; }
+  .sub { color:var(--muted); font-size:12px; margin-bottom:16px; }
+
+  /* ---- KPI cards ---- */
+  .kpis { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin-bottom:16px; }
+  .kpi { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:14px 16px; }
+  .kpi .lbl { font-size:12px; color:var(--muted); margin-bottom:6px; }
+  .kpi .val { font-size:26px; font-weight:700; }
+  .kpi .val small { font-size:13px; color:var(--muted); font-weight:400; }
+  .kpi .trend { font-size:11px; margin-top:4px; }
+  .up { color:var(--green); } .warn { color:var(--amber); } .down { color:var(--red); }
+  .pulse { display:inline-block; width:8px; height:8px; border-radius:50%;
+    background:var(--blue); margin-right:6px; animation:pl 1.6s infinite; }
+  @keyframes pl { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+  .grid { display:grid; grid-template-columns:1fr 320px; gap:12px; align-items:start; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:12px;
+    padding:16px; margin-bottom:12px; }
+  .card h2 { font-size:14px; margin-bottom:12px; display:flex; align-items:center; }
+  .card h2 .more { margin-left:auto; font-size:12px; color:var(--blue); font-weight:400; }
+
+  /* cluster cards */
+  .clusters { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .cluster { background:var(--panel2); border:1px solid var(--border); border-radius:10px; padding:14px; }
+  .cluster .nm { font-weight:700; font-size:13px; margin-bottom:2px; }
+  .cluster .ver { font-size:11px; color:var(--faint); font-family:ui-monospace,Menlo,monospace; }
+  .cluster .nodes { font-size:22px; font-weight:700; margin:10px 0 2px; }
+  .cluster .nodes small { font-size:12px; color:var(--muted); font-weight:400; }
+  .bar { height:6px; background:#0b0e14; border-radius:3px; margin:8px 0 6px; overflow:hidden; }
+  .bar i { display:block; height:100%; border-radius:3px; }
+  .ok { color:var(--green); font-size:12px; } .bad { color:var(--red); font-size:12px; }
+
+  /* node table */
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th { text-align:left; color:var(--faint); font-weight:500; font-size:11.5px;
+    padding:8px 10px; border-bottom:1px solid var(--border); }
+  td { padding:9px 10px; border-bottom:1px solid #1a2030; }
+  tr:last-child td { border-bottom:none; }
+  .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+  .tag { display:inline-block; font-size:11px; padding:2px 8px; border-radius:10px; }
+  .t-green { background:rgba(63,185,80,.14); color:var(--green); }
+  .t-amber { background:rgba(210,153,34,.14); color:var(--amber); }
+  .t-red { background:rgba(248,81,73,.14); color:var(--red); }
+  .t-blue { background:rgba(88,166,255,.14); color:var(--blue); }
+  .t-gray { background:#232a3a; color:var(--muted); }
+  .meter { width:90px; height:5px; background:#0b0e14; border-radius:3px; overflow:hidden;
+    display:inline-block; vertical-align:middle; }
+  .meter i { display:block; height:100%; }
+  .btn { background:#1b2740; border:1px solid #2c3d66; color:#cfe0ff; font-size:12px;
+    padding:5px 12px; border-radius:7px; cursor:pointer; }
+  .btn:hover { background:#243354; }
+  .btn.warn-b { background:rgba(210,153,34,.12); border-color:#5a4517; color:var(--amber); }
+
+  /* right column */
+  .log { background:#080a0f; border:1px solid var(--border); border-radius:8px;
+    padding:10px 12px; font-family:ui-monospace,Menlo,monospace; font-size:11.5px;
+    line-height:1.7; color:#9fb3c8; max-height:190px; overflow:hidden; }
+  .log .g { color:var(--green); } .log .y { color:var(--amber); } .log .b { color:var(--blue); }
+  .todo { display:flex; gap:10px; align-items:flex-start; padding:9px 0;
+    border-bottom:1px solid #1a2030; font-size:12.5px; }
+  .todo:last-child { border:none; }
+  .todo .n { background:var(--amber); color:#111; font-weight:700; font-size:11px;
+    min-width:20px; height:20px; border-radius:50%; display:flex; align-items:center;
+    justify-content:center; }
+  .todo .n.blue { background:var(--blue); color:#08111f; }
+  .todo small { color:var(--muted); display:block; font-size:11.5px; }
+  .qa { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .qa button { background:var(--panel2); border:1px solid var(--border); color:var(--text);
+    border-radius:8px; padding:10px; font-size:12.5px; cursor:pointer; }
+  .qa button:hover { border-color:var(--blue); }
+
+  .jobs td .st { font-weight:600; }
+  .foot { color:var(--faint); font-size:11px; margin-top:14px; text-align:center; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <aside class="sidebar">
+    <div class="logo">
+      <div class="logo-mark">A</div>
+      <div><b>Ansible GUI</b><span>server management</span></div>
+    </div>
+    <div class="nav-sec">維運</div>
+    <nav class="nav">
+      <a href="#" class="active"><span class="ico">▦</span>總覽儀表板</a>
+      <a href="#"><span class="ico">🖥</span>主機 <span class="badge-n">14</span></a>
+      <a href="#"><span class="ico">☸</span>叢集 <span class="badge-n">2</span></a>
+      <a href="#"><span class="ico">🛠</span>節點維護 <span class="badge-n">3</span></a>
+    </nav>
+    <div class="nav-sec">自動化</div>
+    <nav class="nav">
+      <a href="#"><span class="ico">📜</span>Playbook</a>
+      <a href="#"><span class="ico">▶</span>任務 <span class="badge-n">1</span></a>
+      <a href="#"><span class="ico">⏱</span>排程</a>
+    </nav>
+    <div class="nav-sec">系統</div>
+    <nav class="nav">
+      <a href="#"><span class="ico">🔑</span>憑證</a>
+      <a href="#"><span class="ico">⚙</span>設定</a>
+    </nav>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <select class="cluster-pick">
+        <option>☸ homelab-k3s（主要）</option>
+        <option>☸ lab-rke2</option>
+        <option>全部叢集</option>
+      </select>
+      <input class="search" placeholder="搜尋主機、任務、節點…">
+      <div class="sp"></div>
+      <div class="bell">🔔<span class="dot"></span></div>
+      <div class="avatar">D</div>
+    </div>
+
+    <h1>總覽</h1>
+    <div class="sub">資料為設計示意 · 2026-09-27 22:30 更新</div>
+
+    <div class="kpis">
+      <div class="kpi"><div class="lbl">受管主機</div><div class="val">14 <small>/ 13 在線</small></div><div class="trend up">▲ SSH 可達率 93%</div></div>
+      <div class="kpi"><div class="lbl">K8s 叢集</div><div class="val">2 <small>14 節點</small></div><div class="trend up">▲ 13 Ready</div></div>
+      <div class="kpi"><div class="lbl">節點待升級</div><div class="val" style="color:var(--amber)">3</div><div class="trend warn">版本漂移需處理</div></div>
+      <div class="kpi"><div class="lbl">進行中任務</div><div class="val"><span class="pulse"></span>1</div><div class="trend" style="color:var(--blue)">worker-03 OS patch 執行中</div></div>
+      <div class="kpi"><div class="lbl">近 7 天任務成功率</div><div class="val">98.4<small>%</small></div><div class="trend up">▲ 126 / 128 成功</div></div>
+    </div>
+
+    <div class="grid">
+      <div>
+        <div class="card">
+          <h2>叢集健康 <span class="more">管理叢集 →</span></h2>
+          <div class="clusters">
+            <div class="cluster">
+              <div class="nm">☸ homelab-k3s</div><div class="ver">v1.31.2 · k3s</div>
+              <div class="nodes">5<small> / 5 節點 Ready</small></div>
+              <div class="bar"><i style="width:100%;background:var(--green)"></i></div>
+              <div class="ok">● 42 Pods 運行正常</div>
+            </div>
+            <div class="cluster">
+              <div class="nm">☸ lab-rke2</div><div class="ver">v1.30.5 · rke2</div>
+              <div class="nodes">8<small> / 9 節點 Ready</small></div>
+              <div class="bar"><i style="width:89%;background:var(--amber)"></i></div>
+              <div class="bad">● rke2-worker-04 NotReady 32 分鐘</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Worker 節點 <span class="more">全部 14 台 →</span></h2>
+          <table>
+            <tr><th>主機</th><th>角色</th><th>K8s 版本</th><th>kubelet</th><th>CPU</th><th>記憶體</th><th>狀態</th><th></th></tr>
+            <tr>
+              <td class="mono">k3s-worker-01</td><td><span class="tag t-blue">worker</span></td>
+              <td class="mono">v1.31.2</td><td class="mono">v1.31.2</td>
+              <td><span class="meter"><i style="width:34%;background:var(--green)"></i></span> 34%</td>
+              <td><span class="meter"><i style="width:58%;background:var(--amber)"></i></span> 58%</td>
+              <td><span class="tag t-green">● Ready</span></td>
+              <td><button class="btn">維護</button></td>
+            </tr>
+            <tr>
+              <td class="mono">k3s-worker-02</td><td><span class="tag t-blue">worker</span></td>
+              <td class="mono">v1.31.2</td><td class="mono">v1.31.2</td>
+              <td><span class="meter"><i style="width:47%;background:var(--green)"></i></span> 47%</td>
+              <td><span class="meter"><i style="width:61%;background:var(--amber)"></i></span> 61%</td>
+              <td><span class="tag t-green">● Ready</span></td>
+              <td><button class="btn">維護</button></td>
+            </tr>
+            <tr>
+              <td class="mono">k3s-worker-03</td><td><span class="tag t-blue">worker</span></td>
+              <td class="mono">v1.30.5</td><td class="mono">v1.30.5</td>
+              <td><span class="meter"><i style="width:22%;background:var(--green)"></i></span> 22%</td>
+              <td><span class="meter"><i style="width:44%;background:var(--green)"></i></span> 44%</td>
+              <td><span class="tag t-amber">▲ 版本漂移</span></td>
+              <td><button class="btn warn-b">升級</button></td>
+            </tr>
+            <tr>
+              <td class="mono">rke2-worker-04</td><td><span class="tag t-blue">worker</span></td>
+              <td class="mono">v1.30.5</td><td class="mono">v1.30.5</td>
+              <td><span class="meter"><i style="width:0%;background:var(--red)"></i></span> —</td>
+              <td><span class="meter"><i style="width:0%;background:var(--red)"></i></span> —</td>
+              <td><span class="tag t-red">● NotReady</span></td>
+              <td><button class="btn">診斷</button></td>
+            </tr>
+            <tr>
+              <td class="mono">k3s-master-01</td><td><span class="tag t-purple">control-plane</span></td>
+              <td class="mono">v1.31.2</td><td class="mono">v1.31.2</td>
+              <td><span class="meter"><i style="width:18%;background:var(--green)"></i></span> 18%</td>
+              <td><span class="meter"><i style="width:52%;background:var(--green)"></i></span> 52%</td>
+              <td><span class="tag t-green">● Ready</span></td>
+              <td><button class="btn">維護</button></td>
+            </tr>
+          </table>
+        </div>
+
+        <div class="card">
+          <h2>最近任務 <span class="more">全部任務 →</span></h2>
+          <table class="jobs">
+            <tr><th>任務</th><th>目標</th><th>狀態</th><th>耗時</th><th>執行者</th><th>開始時間</th></tr>
+            <tr><td>worker-03 OS 安全更新</td><td class="mono">k3s-worker-03</td><td class="st" style="color:var(--blue)"><span class="pulse"></span>執行中</td><td class="mono">04:12</td><td>Dylan</td><td class="mono">22:26</td></tr>
+            <tr><td>每週 OS patch（排程）</td><td class="mono">patch-group</td><td class="st" style="color:var(--green)">成功</td><td class="mono">18:44</td><td>排程</td><td class="mono">09-21 02:00</td></tr>
+            <tr><td>k3s-worker-02 kubelet 升級</td><td class="mono">k3s-worker-02</td><td class="st" style="color:var(--green)">成功</td><td class="mono">06:03</td><td>Dylan</td><td class="mono">09-20 15:42</td></tr>
+            <tr><td>lab-rke2 節點盤點</td><td class="mono">lab-rke2/*</td><td class="st" style="color:var(--red)">失敗</td><td class="mono">00:37</td><td>Dylan</td><td class="mono">09-19 11:05</td></tr>
+          </table>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <h2>進行中任務 <span class="more">即時日誌 →</span></h2>
+          <div class="log">
+            <div><span class="b">TASK</span> [patch] 安全更新套件清單</div>
+            <div><span class="g">ok</span>: [k3s-worker-03] => 14 個套件可更新</div>
+            <div><span class="b">TASK</span> [patch] 執行 apt upgrade</div>
+            <div><span class="g">changed</span>: [k3s-worker-03] => 14 updated</div>
+            <div><span class="b">TASK</span> [verify] 等待節點恢復 Ready</div>
+            <div><span class="y">…</span> 等待中 <span class="y">04:12</span> / 預估 06:00</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>待辦維運</h2>
+          <div class="todo"><div class="n">3</div><div>節點版本漂移<small>k3s-worker-03 等 3 台低於期望版本 v1.31.2</small></div></div>
+          <div class="todo"><div class="n">2</div><div>主機待 OS 安全更新<small>上次掃描發現 27 個安全更新</small></div></div>
+          <div class="todo"><div class="n blue">⏱</div><div>下次排程：每週 OS patch<small>週日 02:00 · patch-group（9 台）</small></div></div>
+        </div>
+
+        <div class="card">
+          <h2>快速動作</h2>
+          <div class="qa">
+            <button>＋ 新增主機</button>
+            <button>▶ 建立任務</button>
+            <button>🛠 節點維護</button>
+            <button>⏱ 新增排程</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="foot">Ansible GUI · 設計稿 v1（桌面版深色）· 數字皆為示意</div>
+  </main>
+</div>
+</body>
+</html>
