@@ -4,6 +4,10 @@ A GUI over Ansible for remote server management, focused on **Kubernetes cluster
 
 > Current stage: 🚧 under development (skeleton) — frontend/backend skeleton is connected: add hosts, run ping over SSH, watch the live log via WebSocket. Job Templates (M3) are in.
 
+![Dashboard mockup](doc/mockups/dashboard.png)
+
+> Design mockups for the dashboard, job detail, node drawer and node maintenance flow live in [`doc/mockups/`](doc/mockups/) (HTML + PNG).
+
 ## Why this exists
 
 Server operators juggle two disconnected toolsets:
@@ -66,4 +70,43 @@ cd frontend && npm install && npm run dev   # http://localhost:5173, /api and /w
 
 ## Tech stack
 
-Frontend React + TypeScript / backend Python (FastAPI) + official `ansible-runner` / PostgreSQL / Redis / docker-compose one-command deploy.
+| Layer | Choice |
+|---|---|
+| Frontend | React + TypeScript (Vite), Nginx-served static build |
+| Backend | Python 3.12, FastAPI, official `ansible-runner`, SQLAlchemy |
+| Database | PostgreSQL 16 |
+| Queue (planned) | Redis / Celery for long-running jobs |
+| Deploy | `docker compose up --build` — postgres + backend + frontend |
+
+CI (`.github/workflows/ci.yml`) runs on every push/PR: backend `pytest` and frontend `npm run build`.
+
+## Repository layout
+
+```
+├── backend/
+│   ├── app/
+│   │   ├── main.py            # FastAPI app: REST API + /ws/jobs/{jid} live log stream
+│   │   ├── models.py          # SQLAlchemy models (hosts, playbooks, templates, jobs)
+│   │   ├── db.py              # DB session / engine
+│   │   ├── runner_service.py  # ansible-runner wrapper (background threads)
+│   │   └── playbooks/         # built-in playbooks (e.g. ad-hoc ping)
+│   ├── tests/                 # pytest API tests (CI-safe, no sshd needed)
+│   ├── requirements.txt / requirements-dev.txt
+│   └── Dockerfile
+├── frontend/
+│   ├── src/
+│   │   ├── pages/             # Dashboard, Hosts, Playbooks, Templates, Jobs, JobDetail
+│   │   ├── components/Layout.tsx
+│   │   └── api.ts             # REST + WebSocket client
+│   ├── nginx.conf             # serves dist/, proxies /api and /ws to backend
+│   └── Dockerfile
+├── doc/
+│   ├── planning.md            # product planning v0.1
+│   ├── feature-list.md        # P0/P1/P2 feature list
+│   ├── testing.md             # test strategy
+│   ├── modules/               # per-module specs (M1–M9)
+│   └── mockups/               # dashboard/job/node-maintenance design mockups (HTML + PNG)
+├── scripts/e2e_smoke.sh       # end-to-end smoke test (needs local sshd)
+├── docker-compose.yml         # postgres + backend + frontend
+└── .github/workflows/ci.yml
+```
