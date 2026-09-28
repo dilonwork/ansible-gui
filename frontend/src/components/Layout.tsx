@@ -8,25 +8,31 @@ export default function Layout() {
           <div className="logo-mark">A</div>
           <div><b>Ansible GUI</b><span>server management</span></div>
         </div>
-        <div className="nav-sec">維運</div>
+        <div className="nav-sec">OPERATE</div>
         <nav className="nav">
           <NavLink to="/" end className={({isActive}) => isActive ? 'active' : ''}>
-            <span className="ico">▦</span>總覽儀表板
+            <span className="ico">▦</span>Dashboard
           </NavLink>
           <NavLink to="/hosts" className={({isActive}) => isActive ? 'active' : ''}>
-            <span className="ico">🖥</span>主機
+            <span className="ico">🖥</span>Hosts
+          </NavLink>
+          <NavLink to="/playbooks" className={({isActive}) => isActive ? 'active' : ''}>
+            <span className="ico">📜</span>Playbooks
+          </NavLink>
+          <NavLink to="/templates" className={({isActive}) => isActive ? 'active' : ''}>
+            <span className="ico">📋</span>Templates
           </NavLink>
           <NavLink to="/jobs" className={({isActive}) => isActive ? 'active' : ''}>
-            <span className="ico">▶</span>任務
+            <span className="ico">▶</span>Jobs
           </NavLink>
         </nav>
-        <div className="nav-sec">系統</div>
+        <div className="nav-sec">SYSTEM</div>
         <nav className="nav">
-          <a href="#" onClick={e => e.preventDefault()} title="之後做">
-            <span className="ico">🔑</span>憑證
+          <a href="#" onClick={e => e.preventDefault()} title="Coming later">
+            <span className="ico">🔑</span>Credentials
           </a>
-          <a href="#" onClick={e => e.preventDefault()} title="之後做">
-            <span className="ico">⚙</span>設定
+          <a href="#" onClick={e => e.preventDefault()} title="Coming later">
+            <span className="ico">⚙</span>Settings
           </a>
         </nav>
       </aside>

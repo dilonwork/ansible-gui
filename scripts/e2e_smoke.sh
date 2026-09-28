@@ -1,26 +1,28 @@
 #!/bin/bash
-# E2E smoke test：對一個已啟動的後端做端到端驗證。
+# E2E smoke test: end-to-end verification against a running backend.
 #
-# 測什麼：新增主機（含真實 ssh-keyscan）→ 建 ping 任務 → 輪詢到結束 →
-#         驗證 status=successful 且事件序列正確 → 清理測試資料。
-# 只用 python3 stdlib，沒有額外依賴。
+# What it covers:
+#   add host (real ssh-keyscan) -> ad-hoc ping job -> poll until done ->
+#   playbook + syntax check + template -> launch job from template ->
+#   verify snapshot and successful run -> clean up test data.
+# Only python3 stdlib is used, no extra dependencies.
 #
-# 前置需求：
-#   1. 後端跑在 $BACKEND_URL（預設 http://localhost:8000）
-#   2. 本機有 sshd 在 127.0.0.1:22（測試目標；沒有會 SKIP）
-#   3. 允許腳本把臨時 pubkey 加入 $SSH_USER 的 authorized_keys（結束後移除）
+# Requirements:
+#   1. backend running at $BACKEND_URL (default http://localhost:8000)
+#   2. local sshd on 127.0.0.1:22 (test target; SKIP if missing)
+#   3. the script may append a temp pubkey to $SSH_USER's authorized_keys (removed on exit)
 #
-# 用法：BACKEND_URL=http://localhost:8000 ./scripts/e2e_smoke.sh
+# Usage: BACKEND_URL=http://localhost:8000 ./scripts/e2e_smoke.sh
 set -u
 
 BACKEND_URL="${BACKEND_URL:-http://localhost:8000}"
-SSH_USER="${SSH_USER:-root}"   # 測試目標的 SSH 使用者
+SSH_USER="${SSH_USER:-root}"   # SSH user of the test target
 TMPDIR_WORK="$(mktemp -d)"
 KEY="$TMPDIR_WORK/id_e2e"
 PUBLINE=""
-# 用 getent 解析該使用者的家目錄（不要用 $HOME：執行環境的 HOME 未必對應 SSH_USER）
+# Resolve the user's home via getent (do NOT use $HOME: it may not match SSH_USER here)
 USER_HOME="$(getent passwd "$SSH_USER" | cut -d: -f6)"
-[ -n "$USER_HOME" ] || { echo "FAIL: 找不到使用者 $SSH_USER"; exit 1; }
+[ -n "$USER_HOME" ] || { echo "FAIL: unknown user $SSH_USER"; exit 1; }
 AUTH_KEYS="$USER_HOME/.ssh/authorized_keys"
 
 pass() { echo "PASS: $1"; }
@@ -28,7 +30,13 @@ fail() { echo "FAIL: $1"; exit 1; }
 skip() { echo "SKIP: $1"; exit 0; }
 
 cleanup() {
-  # 移除測試主機與臨時 pubkey
+  # remove test template / playbook / host and the temp pubkey
+  if [ -n "${TPL_ID:-}" ]; then
+    curl -s -X DELETE "$BACKEND_URL/api/templates/$TPL_ID" > /dev/null 2>&1
+  fi
+  if [ -n "${PB_ID:-}" ]; then
+    curl -s -X DELETE "$BACKEND_URL/api/playbooks/$PB_ID" > /dev/null 2>&1
+  fi
   if [ -n "${HOST_ID:-}" ]; then
     curl -s -X DELETE "$BACKEND_URL/api/hosts/$HOST_ID" > /dev/null 2>&1
   fi
@@ -43,24 +51,24 @@ trap cleanup EXIT
 echo "== E2E smoke =="
 echo "backend: $BACKEND_URL"
 
-# 1. 後端可達？
+# 1. backend reachable?
 curl -s -m 5 "$BACKEND_URL/api/hosts" > /dev/null 2>&1 \
-  || fail "後端連不上（$BACKEND_URL）"
+  || fail "backend unreachable ($BACKEND_URL)"
 
-# 2. 本機 sshd？
+# 2. local sshd?
 (timeout 3 bash -c "</dev/tcp/127.0.0.1/22" 2>/dev/null) \
-  || skip "本機 127.0.0.1:22 沒有 sshd，無法做端到端測試"
+  || skip "no sshd on 127.0.0.1:22, cannot run end-to-end test"
 
-# 3. 臨時 keypair + 註冊 pubkey（寫入 SSH_USER 的 authorized_keys）
+# 3. temp keypair + register pubkey in SSH_USER's authorized_keys
 ssh-keygen -t ed25519 -f "$KEY" -N "" -C "e2e-smoke-test" -q \
-  || fail "keypair 產生失敗"
+  || fail "keypair generation failed"
 mkdir -p "$USER_HOME/.ssh" && chmod 700 "$USER_HOME/.ssh"
 PUBLINE="$(cat "$KEY.pub")"
 grep -q "e2e-smoke-test" "$AUTH_KEYS" 2>/dev/null \
   || echo "$PUBLINE" >> "$AUTH_KEYS"
 chmod 600 "$AUTH_KEYS"
 
-# 4. 新增主機（含真實 keyscan）
+# 4. add host (real keyscan)
 HOST_RESP="$(python3 - "$BACKEND_URL" "$KEY" "$SSH_USER" <<'EOF'
 import json, sys, urllib.request
 base, key_path, ssh_user = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -75,11 +83,11 @@ except Exception as e:
     print("ERROR:" + str(e)); sys.exit(1)
 EOF
 )"
-case "$HOST_RESP" in ERROR*) fail "新增主機失敗：$HOST_RESP";; esac
+case "$HOST_RESP" in ERROR*) fail "add host failed: $HOST_RESP";; esac
 HOST_ID="$HOST_RESP"
-pass "新增主機（含 keyscan）id=$HOST_ID"
+pass "host added (keyscan) id=$HOST_ID"
 
-# 5. 建任務 → 輪詢 → 驗證
+# 5. ad-hoc ping job -> poll -> verify
 python3 - "$BACKEND_URL" "$HOST_ID" <<'EOF'
 import json, sys, time, urllib.request
 base, hid = sys.argv[1], sys.argv[2]
@@ -93,11 +101,61 @@ for _ in range(60):
     if job["status"] != "running":
         break
     time.sleep(1)
-assert job["status"] == "successful", f"任務未成功：{job['status']}"
+assert job["status"] == "successful", f"job not successful: {job['status']}"
 types = [e["type"] for e in job["events"]]
-assert types == ["job_started", "task_start", "host_ok", "job_finished"], f"事件序列異常：{types}"
-print(f"任務 {jid} 成功，事件序列正確")
+assert types == ["job_started", "task_start", "host_ok", "job_finished"], f"bad event sequence: {types}"
+print(f"ping job {jid} ok")
 EOF
-[ $? -eq 0 ] && pass "ping 任務端到端成功" || fail "ping 任務失敗"
+[ $? -eq 0 ] && pass "ad-hoc ping end-to-end ok" || fail "ad-hoc ping job failed"
 
-echo "== 全部通過 =="
+# 6. playbook + syntax check + template + launch -> verify snapshot and run
+TPL_PB_IDS="$(python3 - "$BACKEND_URL" "$HOST_ID" <<'EOF'
+import json, sys, time, urllib.request
+base, hid = sys.argv[1], sys.argv[2]
+def api(method, path, body=None):
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(base + path, data=data, method=method,
+                                 headers={"Content-Type": "application/json"})
+    return json.load(urllib.request.urlopen(req, timeout=60))
+
+pb_yaml = """- name: e2e template test
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: echo var
+      ansible.builtin.shell: "echo {{ e2e_msg }}"
+      register: out
+    - name: show output
+      ansible.builtin.debug:
+        var: out.stdout
+"""
+pb_id = api("POST", "/api/playbooks", {"name": "e2e-playbook", "content": pb_yaml})["id"]
+chk = api("POST", f"/api/playbooks/{pb_id}/syntax-check")
+assert chk["ok"] is True, f"syntax check failed: {chk['output'][:300]}"
+
+tpl_id = api("POST", "/api/templates", {
+    "name": "e2e-template", "playbook_id": pb_id, "host_ids": [hid],
+    "extra_vars": {"e2e_msg": "hello-e2e"}, "check_mode": False})["id"]
+
+jid = api("POST", "/api/jobs", {"template_id": tpl_id})["job_id"]
+for _ in range(90):
+    job = api("GET", f"/api/jobs/{jid}")
+    if job["status"] != "running":
+        break
+    time.sleep(1)
+assert job["status"] == "successful", f"template job not successful: {job['status']}"
+snap = job["snapshot"]
+assert snap["kind"] == "template", f"bad snapshot kind: {snap['kind']}"
+assert snap["template_name"] == "e2e-template"
+assert snap["extra_vars"] == {"e2e_msg": "hello-e2e"}, f"bad snapshot vars: {snap['extra_vars']}"
+assert any(e["type"] == "host_ok" for e in job["events"]), "no host_ok event"
+print(f"template job {jid} ok, snapshot verified")
+print(f"IDS:{tpl_id}:{pb_id}")
+EOF
+)"
+[ $? -eq 0 ] || fail "template flow failed"
+TPL_ID="$(echo "$TPL_PB_IDS" | grep '^IDS:' | cut -d: -f2)"
+PB_ID="$(echo "$TPL_PB_IDS" | grep '^IDS:' | cut -d: -f3)"
+pass "playbook + syntax check + template + snapshot launch ok"
+
+echo "== ALL PASSED =="

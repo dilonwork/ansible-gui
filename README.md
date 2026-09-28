@@ -1,60 +1,69 @@
 # ansible-gui
 
-以 GUI 整合 Ansible 的遠端伺服器管理平台，核心場景是 **Kubernetes 叢集與 Worker Nodes 的維運**（OS patch、kubelet 升級、cordon/drain 編排）。
+A GUI over Ansible for remote server management, focused on **Kubernetes clusters and worker node operations** (OS patching, kubelet upgrades, cordon/drain orchestration).
 
-> 目前階段：🚧 開發中（skeleton）— 前後端骨架已打通：可新增主機、經 SSH 跑 ping、WebSocket 看即時日誌。
+> Current stage: 🚧 under development (skeleton) — frontend/backend skeleton is connected: add hosts, run ping over SSH, watch the live log via WebSocket. Job Templates (M3) are in.
 
-## 一鍵啟動
+## Why this exists
+
+Server operators juggle two disconnected toolsets:
+
+- **Ansible GUIs** (AWX, Semaphore) run playbooks but can't see K8s node state
+- **K8s management GUIs** (Rancher, Portainer, Headlamp) manage in-cluster resources but can't touch the OS layer
+
+Something is missing in the middle: **an operations plane that knows K8s node state and can act on the OS layer with Ansible**. AWX is too heavy, Semaphore is too light with no K8s view — this project fills the gap.
+
+## Quickstart
 
 ```bash
 docker compose up --build
 ```
 
-- 前端：http://localhost:3000
-- 後端 API：http://localhost:8000（`/docs` 有 Swagger）
+- Frontend: http://localhost:3000
+- Backend API: http://localhost:8000 (`/docs` for Swagger)
 
-本機開發：
+Local development:
 
 ```bash
-# 後端
+# backend
 cd backend && pip install -r requirements.txt && uvicorn app.main:app --port 8000
-# 前端
-cd frontend && npm install && npm run dev   # http://localhost:5173，/api 與 /ws 會代理到後端
+# frontend
+cd frontend && npm install && npm run dev   # http://localhost:5173, /api and /ws are proxied to the backend
 ```
 
-## 為什麼做這個
+## What works today (skeleton)
 
-管伺服器的人手上有兩套割裂的工具：
+- Host inventory: add via UI (SSH keyscan probe), list, delete
+- Playbooks: register inline YAML, browse, `ansible-playbook --syntax-check`
+- Job Templates: bind playbook + hosts + extra_vars + check mode; launching a job freezes a snapshot
+- Jobs: ad-hoc ping or launch from template; live event log over WebSocket
+- Tests: `cd backend && python -m pytest tests/ -q`; E2E: `./scripts/e2e_smoke.sh`; CI runs on every push
 
-- **Ansible GUI**（AWX、Semaphore）只管 playbook 執行，看不到 K8s 節點狀態
-- **K8s 管理 GUI**（Rancher、Portainer、Headlamp）只管叢集內資源，管不到 OS 層
+## Docs
 
-中間缺了一塊：**「知道 K8s 節點狀態，又能用 Ansible 對 OS 層動手」的維運平面**。AWX 太重、Semaphore 太輕無 K8s 視角 — 這個專案填補中間的空隙。
-
-## 文件
-
-| 文件 | 說明 |
+| Doc | Description |
 |---|---|
-| [doc/planning.md](doc/planning.md) | 功能規劃 v0.1：專案定位、成功案例收集、模組規劃、技術架構、Roadmap |
-| [doc/feature-list.md](doc/feature-list.md) | 詳細功能清單（P0/P1/P2 優先級） |
-| [doc/dashboard-design.md](doc/dashboard-design.md) | 儀表板設計說明 |
-| [doc/mockups/dashboard.html](doc/mockups/dashboard.html) | 儀表板設計稿（瀏覽器開啟） |
-| [doc/mockups/dashboard.png](doc/mockups/dashboard.png) | 儀表板設計稿截圖 |
+| [doc/planning.md](doc/planning.md) | Product planning v0.1: positioning, case studies, module plan, tech architecture, roadmap |
+| [doc/feature-list.md](doc/feature-list.md) | Detailed feature list (P0/P1/P2) |
+| [doc/testing.md](doc/testing.md) | Test strategy: layers, CI, Definition of Done |
+| [doc/modules/](doc/modules/) | Detailed spec per module (M1–M9) |
+| [doc/mockups/dashboard.html](doc/mockups/dashboard.html) | Dashboard mockup (open in browser) |
+| [doc/mockups/dashboard.png](doc/mockups/dashboard.png) | Dashboard mockup screenshot |
 
-## 規劃中的核心功能
+## Planned core features
 
-- 🖥️ 主機 Inventory（靜態＋從 K8s 自動同步 worker nodes）
-- 📜 Playbook Git 同步 ＋ Job Template ＋ Ad-hoc command
-- ☸️ 多叢集節點總覽（版本、Ready 狀態、資源使用率）
-- 🛠️ **一鍵節點維護工作流**：cordon → drain → patch/升級 → 驗證 → uncordon（逐台、失敗即停）
-- 📊 版本漂移偵測、即時任務日誌、審批、排程、RBAC
+- 🖥️ Host inventory (static + auto-sync of worker nodes from K8s)
+- 📜 Playbook Git sync + Job Templates + ad-hoc commands
+- ☸️ Multi-cluster node overview (versions, Ready state, resource usage)
+- 🛠️ **One-click node maintenance workflow**: cordon → drain → patch/upgrade → verify → uncordon (one node at a time, stop on failure)
+- 📊 Version drift detection, live task logs, approvals, scheduling, RBAC
 
 ## Roadmap
 
-- **Phase 1 — MVP**：inventory＋K8s 節點同步、Job Template 執行、一鍵節點維護工作流；驗收標準是在 homelab 對 3 台 worker 做一次全程 GUI 的 rolling OS patch
-- **Phase 2 — 團隊可用**：排程、審批、RBAC、多叢集、漂移偵測、通知
-- **Phase 3 — 強化**：審計鏈、容量趨勢、AWX/Semaphore 匯入工具
+- **Phase 1 — MVP**: inventory + K8s node sync, Job Template execution, one-click node maintenance workflow; acceptance: a fully GUI-driven rolling OS patch across 3 workers in the homelab
+- **Phase 2 — team-ready**: scheduling, approvals, RBAC, multi-cluster, drift detection, notifications
+- **Phase 3 — hardening**: audit chain, capacity trends, AWX/Semaphore import tool
 
-## 技術棧
+## Tech stack
 
-前端 React＋TypeScript ／ 後端 Python（FastAPI）＋官方 `ansible-runner` ／ PostgreSQL ／ Redis ／ docker-compose 一鍵部署。
+Frontend React + TypeScript / backend Python (FastAPI) + official `ansible-runner` / PostgreSQL / Redis / docker-compose one-command deploy.

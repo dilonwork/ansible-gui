@@ -1,16 +1,16 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { api, type Host, type Job } from '../api'
+import { api, type Host, type JobSummary } from '../api'
 
-function statusTag(s: Job['status']) {
-  if (s === 'running') return <span className="tag t-blue"><span className="pulse" />執行中</span>
-  if (s === 'successful') return <span className="tag t-green">✓ 成功</span>
-  return <span className="tag t-red">✕ 失敗</span>
+function statusTag(s: JobSummary['status']) {
+  if (s === 'running') return <span className="tag t-blue"><span className="pulse" />Running</span>
+  if (s === 'successful') return <span className="tag t-green">✓ Success</span>
+  return <span className="tag t-red">✕ Failed</span>
 }
 
 export default function Dashboard() {
   const [hosts, setHosts] = useState<Host[]>([])
-  const [jobs, setJobs] = useState<Job[]>([])
+  const [jobs, setJobs] = useState<JobSummary[]>([])
 
   useEffect(() => {
     api.listHosts().then(setHosts).catch(() => {})
@@ -24,29 +24,30 @@ export default function Dashboard() {
 
   return (
     <>
-      <div className="page-head"><h1>總覽儀表板</h1></div>
-      <div className="page-sub">skeleton 版：數字來自真實 API，K8s 叢集尚未接入</div>
+      <div className="page-head"><h1>Dashboard</h1></div>
+      <div className="page-sub">Skeleton build: numbers come from the real API; no K8s cluster connected yet</div>
 
       <div className="kpis">
-        <div className="kpi"><div className="lbl">管理主機</div><div className="val">{hosts.length}</div></div>
-        <div className="kpi"><div className="lbl">任務總數</div><div className="val">{jobs.length}</div></div>
-        <div className="kpi"><div className="lbl">任務成功率</div><div className="val" style={{color: rate >= 80 ? '#3fb950' : '#d29922'}}>{rate}%</div></div>
-        <div className="kpi"><div className="lbl">執行中任務</div><div className="val run">{running}</div></div>
+        <div className="kpi"><div className="lbl">Managed hosts</div><div className="val">{hosts.length}</div></div>
+        <div className="kpi"><div className="lbl">Total jobs</div><div className="val">{jobs.length}</div></div>
+        <div className="kpi"><div className="lbl">Job success rate</div><div className="val" style={{color: rate >= 80 ? '#3fb950' : '#d29922'}}>{rate}%</div></div>
+        <div className="kpi"><div className="lbl">Running jobs</div><div className="val run">{running}</div></div>
       </div>
 
       <div className="grid2">
         <div className="card">
-          <h2>最近任務</h2>
-          {recent.length === 0 ? <div className="empty">還沒有任務，去「任務」頁跑一次 ping 吧</div> : (
+          <h2>Recent jobs</h2>
+          {recent.length === 0 ? <div className="empty">No jobs yet — run a ping from the Jobs page</div> : (
             <table>
-              <thead><tr><th>任務</th><th>主機數</th><th>狀態</th><th>開始</th></tr></thead>
+              <thead><tr><th>Job</th><th>Playbook</th><th>Hosts</th><th>Status</th><th>Started</th></tr></thead>
               <tbody>
                 {recent.map(j => (
                   <tr key={j.id} className="clickable">
-                    <td><Link to={`/jobs/${j.id}`} className="mono">ping #{j.id}</Link></td>
+                    <td><Link to={`/jobs/${j.id}`} className="mono">#{j.id}</Link></td>
+                    <td className="mut">{j.kind === 'template' ? j.template_name : 'ad-hoc ping'}</td>
                     <td className="mut">{j.host_ids.length}</td>
                     <td>{statusTag(j.status)}</td>
-                    <td className="mut">{new Date(j.created_at * 1000).toLocaleString('zh-TW', {hour12: false})}</td>
+                    <td className="mut">{new Date(j.created_at * 1000).toLocaleString('en-US', {hour12: false})}</td>
                   </tr>
                 ))}
               </tbody>
@@ -54,8 +55,8 @@ export default function Dashboard() {
           )}
         </div>
         <div className="card">
-          <h2>Worker 節點</h2>
-          <div className="empty">尚未接入 K8s 叢集<br /><span style={{fontSize: 11}}>（M4 叢集管理完成後這裡會顯示節點表）</span></div>
+          <h2>Worker nodes</h2>
+          <div className="empty">No Kubernetes cluster connected yet<br /><span style={{fontSize: 11}}>(Cluster management, M4, is not implemented yet)</span></div>
         </div>
       </div>
     </>

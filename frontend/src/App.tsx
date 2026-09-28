@@ -4,6 +4,8 @@ import Dashboard from './pages/Dashboard'
 import Hosts from './pages/Hosts'
 import Jobs from './pages/Jobs'
 import JobDetail from './pages/JobDetail'
+import Playbooks from './pages/Playbooks'
+import Templates from './pages/Templates'
 
 export default function App() {
   return (
@@ -12,6 +14,8 @@ export default function App() {
         <Route element={<Layout />}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/hosts" element={<Hosts />} />
+          <Route path="/playbooks" element={<Playbooks />} />
+          <Route path="/templates" element={<Templates />} />
           <Route path="/jobs" element={<Jobs />} />
           <Route path="/jobs/:id" element={<JobDetail />} />
         </Route>
