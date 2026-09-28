@@ -1,0 +1,8 @@
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    # 之後加上：
+    # - redis（Celery broker，長任務改走 Celery）
+    # - postgres（取代記憶體 dict）

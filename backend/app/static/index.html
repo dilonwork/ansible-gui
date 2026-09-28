@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>Ansible GUI — skeleton demo</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#0b0e14; color:#e6e9f0; font-family:-apple-system,"Microsoft JhengHei",sans-serif; font-size:13px; padding:24px; }
+  h1 { font-size:18px; margin-bottom:4px; }
+  .sub { color:#8b93a7; font-size:12px; margin-bottom:20px; }
+  .grid { display:grid; grid-template-columns:380px 1fr; gap:16px; align-items:start; }
+  .card { background:#12161f; border:1px solid #232a3a; border-radius:12px; padding:16px; margin-bottom:16px; }
+  .card h2 { font-size:14px; margin-bottom:12px; }
+  label { display:block; color:#8b93a7; font-size:12px; margin:8px 0 4px; }
+  input, textarea { width:100%; background:#0b0e14; border:1px solid #232a3a; border-radius:8px; color:#e6e9f0; padding:8px 10px; font-size:13px; font-family:inherit; }
+  textarea { font-family:ui-monospace,monospace; font-size:11px; }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  button { background:#1b2740; border:1px solid #2c3d66; color:#cfe0ff; border-radius:8px; padding:9px 16px; font-size:13px; cursor:pointer; margin-top:12px; }
+  button:hover { background:#243357; }
+  button.primary { background:#e6355f; border-color:#e6355f; color:#fff; font-weight:600; }
+  .host { display:flex; align-items:center; gap:10px; background:#171c28; border:1px solid #232a3a; border-radius:8px; padding:10px 12px; margin-bottom:8px; }
+  .host .mono { font-family:ui-monospace,monospace; font-size:12px; }
+  .host small { color:#8b93a7; display:block; font-size:11px; }
+  .host .del { margin-left:auto; background:none; border:none; color:#5b6378; padding:4px 8px; margin-top:0; cursor:pointer; }
+  .log { background:#080a0f; border:1px solid #232a3a; border-radius:8px; padding:12px 14px; font-family:ui-monospace,monospace; font-size:12px; line-height:1.8; min-height:300px; max-height:480px; overflow-y:auto; }
+  .log .ok { color:#3fb950; } .log .bad { color:#f85149; } .log .inf { color:#58a6ff; } .log .dim { color:#5b6378; }
+  .status { display:inline-block; font-size:11px; padding:3px 10px; border-radius:10px; margin-left:8px; }
+  .st-run { background:rgba(88,166,255,.14); color:#58a6ff; }
+  .st-ok { background:rgba(63,185,80,.14); color:#3fb950; }
+  .st-fail { background:rgba(248,81,73,.14); color:#f85149; }
+  .empty { color:#5b6378; font-size:12px; }
+</style>
+</head>
+<body>
+<h1>Ansible GUI <span style="color:#8b93a7;font-weight:400;font-size:13px">— 後端骨架 demo</span></h1>
+<div class="sub">鏈路：瀏覽器 → REST → 背景執行緒跑 ansible-runner → SSH → 主機 → WebSocket 即時回傳</div>
+
+<div class="grid">
+  <div>
+    <div class="card">
+      <h2>新增主機</h2>
+      <label>名稱</label><input id="f-name" value="testbox" placeholder="k3s-worker-01">
+      <div class="row">
+        <div><label>IP / 主機名</label><input id="f-addr" value="127.0.0.1"></div>
+        <div><label>Port</label><input id="f-port" value="22"></div>
+      </div>
+      <label>SSH 使用者</label><input id="f-user" value="root">
+      <label>SSH 私鑰</label><textarea id="f-key" rows="4" placeholder="-----BEGIN OPENSSH PRIVATE KEY----- ..."></textarea>
+      <button id="btn-add">＋ 新增（會做 keyscan 探測）</button>
+      <div id="add-msg" class="empty" style="margin-top:8px"></div>
+    </div>
+    <div class="card">
+      <h2>主機清單</h2>
+      <div id="hosts"><div class="empty">尚未新增主機</div></div>
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <h2>執行 ping 測試</h2>
+      <div class="empty" style="margin-bottom:8px">勾選左側主機後執行。ansible 會經 SSH 連線跑 ping module。</div>
+      <button class="primary" id="btn-run">▶ 對勾選的主機執行 ping</button>
+      <span id="job-status"></span>
+    </div>
+    <div class="card">
+      <h2>即時日誌 <span class="dim" style="color:#5b6378;font-size:11px;font-weight:400">— WebSocket 串流</span></h2>
+      <div class="log" id="log"><div class="dim">// 等待任務…</div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let hostList = [];
+
+async function refreshHosts() {
+  const r = await fetch('/api/hosts');
+  hostList = await r.json();
+  $('hosts').innerHTML = hostList.length ? '' : '<div class="empty">尚未新增主機</div>';
+  hostList.forEach(h => {
+    const d = document.createElement('div');
+    d.className = 'host';
+    d.innerHTML = `<input type="checkbox" data-id="${h.id}" checked>
+      <div><div class="mono">${h.name}</div><small>${h.username}@${h.address}:${h.port}</small></div>
+      <button class="del" data-del="${h.id}">✕</button>`;
+    $('hosts').appendChild(d);
+  });
+  document.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+    await fetch('/api/hosts/' + b.dataset.del, {method: 'DELETE'});
+    refreshHosts();
+  });
+}
+
+$('btn-add').onclick = async () => {
+  $('add-msg').textContent = '探測中…';
+  const body = { name: $('f-name').value, address: $('f-addr').value,
+    port: +$('f-port').value || 22, username: $('f-user').value, private_key: $('f-key').value };
+  const r = await fetch('/api/hosts', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  const j = await r.json();
+  $('add-msg').textContent = r.ok ? `✓ 已新增（keyscan 通過）` : `✕ ${j.detail || '失敗'}`;
+  if (r.ok) { $('f-key').value = ''; refreshHosts(); }
+};
+
+$('btn-run').onclick = async () => {
+  const ids = [...document.querySelectorAll('#hosts input[type=checkbox]:checked')].map(c => c.dataset.id);
+  if (!ids.length) { alert('先勾選主機'); return; }
+  const r = await fetch('/api/jobs', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({host_ids: ids})});
+  const {job_id} = await r.json();
+  $('job-status').innerHTML = `<span class="status st-run">● 執行中 ${job_id}</span>`;
+  $('log').innerHTML = '';
+  const ws = new WebSocket(`ws://${location.host}/ws/jobs/${job_id}`);
+  ws.onmessage = ev => {
+    const e = JSON.parse(ev.data);
+    const line = document.createElement('div');
+    if (e.type === 'job_started') line.innerHTML = `<span class="inf">▶ 任務開始</span>`;
+    else if (e.type === 'task_start') line.innerHTML = `<span class="dim">TASK</span> ${e.task}`;
+    else if (e.type === 'host_ok') line.innerHTML = `<span class="ok">✓ ok</span> <span class="dim">[${e.host}]</span> ${e.task}`;
+    else if (e.type === 'host_failed') line.innerHTML = `<span class="bad">✕ failed</span> <span class="dim">[${e.host}]</span> ${e.task} — ${e.msg}`;
+    else if (e.type === 'host_unreachable') line.innerHTML = `<span class="bad">✕ unreachable</span> <span class="dim">[${e.host}]</span> — ${e.msg}`;
+    else if (e.type === 'job_finished') {
+      line.innerHTML = `<span class="inf">■ 任務結束</span>`;
+      fetch('/api/jobs/' + job_id).then(r => r.json()).then(j => {
+        $('job-status').innerHTML = j.status === 'successful'
+          ? `<span class="status st-ok">✓ 成功</span>` : `<span class="status st-fail">✕ 失敗</span>`;
+      });
+      setTimeout(() => ws.close(), 300);
+    }
+    else return;
+    $('log').appendChild(line);
+    $('log').scrollTop = $('log').scrollHeight;
+  };
+};
+
+refreshHosts();
+</script>
+</body>
+</html>
