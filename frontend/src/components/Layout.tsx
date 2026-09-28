@@ -5,8 +5,8 @@ export default function Layout() {
     <div className="app">
       <aside className="sidebar">
         <div className="logo">
-          <div className="logo-mark">A</div>
-          <div><b>Ansible GUI</b><span>server management</span></div>
+          <div className="logo-mark">⚓</div>
+          <div><b>Drydock</b><span>fleet maintenance</span></div>
         </div>
         <div className="nav-sec">OPERATE</div>
         <nav className="nav">

@@ -1,4 +1,4 @@
-"""Ansible GUI backend (skeleton).
+"""Drydock backend (skeleton).
 
 Flow: browser -> REST (hosts / playbooks / templates / jobs) ->
 background thread runs ansible-runner -> event_handler emits live ->
@@ -38,7 +38,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Ansible GUI (skeleton)", lifespan=lifespan)
+app = FastAPI(title="Drydock API (skeleton)", lifespan=lifespan)
 
 ws_queues: dict[str, list[asyncio.Queue]] = {}  # job_id -> [queues] (ephemeral)
 loop: asyncio.AbstractEventLoop | None = None

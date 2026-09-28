@@ -1,4 +1,4 @@
-# Side Project：Ansible GUI 遠端伺服器管理平台 — 功能規劃 v0.1
+# Side Project：Drydock 遠端伺服器管理平台 — 功能規劃 v0.1
 
 > 目標：以 GUI 整合 Ansible，對伺服器做遠端管理；核心場景是 **Kubernetes 叢集與 Worker Nodes 的維運**。
 > 階段：先收集成功案例 → 功能規劃（本文件）→ 之後再進技術選型與 MVP 開發。

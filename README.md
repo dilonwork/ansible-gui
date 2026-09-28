@@ -1,6 +1,10 @@
-# ansible-gui
+<p align="center"><img src="docs/images/logo.svg" width="80" alt="Drydock logo"></p>
 
-A GUI over Ansible for remote server management, focused on **Kubernetes clusters and worker node operations** (OS patching, kubelet upgrades, cordon/drain orchestration).
+<h1 align="center">Drydock</h1>
+
+<p align="center"><i>Bring your fleet in for servicing.</i></p>
+
+<p align="center">A GUI over Ansible for remote server management, focused on <b>Kubernetes clusters and worker node operations</b> (OS patching, kubelet upgrades, cordon/drain orchestration).</p>
 
 > Current stage: 🚧 under development (skeleton) — frontend/backend skeleton is connected: add hosts, run ping over SSH, watch the live log via WebSocket. Job Templates (M3) are in.
 
