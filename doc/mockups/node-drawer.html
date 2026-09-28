@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>節點詳情抽屜（設計稿 v1）</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  :root { --bg:#0b0e14; --panel:#12161f; --panel2:#171c28; --border:#232a3a;
+    --text:#e6e9f0; --muted:#8b93a7; --faint:#5b6378;
+    --green:#3fb950; --amber:#d29922; --red:#f85149; --blue:#58a6ff; --purple:#bc8cff; }
+  body { background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft JhengHei",sans-serif; font-size:13px; }
+  .app { display:flex; min-height:100vh; }
+  .sidebar { width:208px; background:#0d1017; border-right:1px solid var(--border); padding:18px 12px; flex-shrink:0; }
+  .logo { display:flex; align-items:center; gap:10px; padding:4px 8px 18px; }
+  .logo-mark { width:32px; height:32px; border-radius:8px; background:linear-gradient(135deg,#e6355f,#7a3ff2);
+    display:flex; align-items:center; justify-content:center; font-weight:800; font-size:16px; color:#fff; }
+  .logo b { font-size:14px; display:block; } .logo span { font-size:11px; color:var(--muted); }
+  .nav-sec { font-size:11px; color:var(--faint); padding:12px 10px 6px; letter-spacing:.08em; }
+  .nav a { display:flex; align-items:center; gap:10px; padding:9px 10px; border-radius:8px; color:var(--muted); text-decoration:none; font-size:13px; }
+  .nav a.active { background:#1b2740; color:#fff; }
+  .ico { width:18px; text-align:center; }
+  .main { flex:1; padding:20px 24px; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px; }
+  .card h2 { font-size:14px; margin-bottom:12px; }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th { text-align:left; color:var(--faint); font-weight:500; font-size:11.5px; padding:8px 10px; border-bottom:1px solid var(--border); }
+  td { padding:10px; border-bottom:1px solid #1a2030; }
+  .mono { font-family:ui-monospace,Menlo,monospace; font-size:12px; }
+  .tag { display:inline-block; font-size:11px; padding:2px 8px; border-radius:10px; }
+  .t-green { background:rgba(63,185,80,.14); color:var(--green); }
+  .t-amber { background:rgba(210,153,34,.14); color:var(--amber); }
+  .dim { filter:brightness(.55); pointer-events:none; }
+
+  /* drawer */
+  .scrim { position:fixed; inset:0; background:rgba(0,0,0,.55); }
+  .drawer { position:fixed; top:0; right:0; width:420px; height:100vh; background:#10141d;
+    border-left:1px solid var(--border); padding:22px; overflow-y:auto; }
+  .drawer .x { float:right; color:var(--faint); font-size:18px; cursor:pointer; }
+  .drawer h1 { font-size:16px; margin-bottom:6px; }
+  .drawer .sub { color:var(--muted); font-size:12px; margin-bottom:14px; }
+  .sec { margin-bottom:18px; }
+  .sec h3 { font-size:12px; color:var(--faint); letter-spacing:.06em; margin-bottom:8px; }
+  .kv { display:flex; justify-content:space-between; font-size:12.5px; padding:6px 0; border-bottom:1px dashed #1c2333; }
+  .kv span { color:var(--muted); }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; }
+  .chip { background:#1a2130; border:1px solid var(--border); border-radius:6px; padding:3px 8px; font-size:11.5px; }
+  .meter { height:6px; background:#0b0e14; border-radius:3px; overflow:hidden; margin:4px 0 10px; }
+  .meter i { display:block; height:100%; }
+  .mrow { display:flex; justify-content:space-between; font-size:12px; color:var(--muted); }
+  .hist { font-size:12px; }
+  .hist div { display:flex; justify-content:space-between; padding:7px 0; border-bottom:1px solid #1a2030; }
+  .ok { color:var(--green); } .bad { color:var(--red); }
+  .dact { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:4px; }
+  .btn { border-radius:8px; padding:10px; font-size:12.5px; cursor:pointer; border:1px solid var(--border); background:var(--panel2); color:var(--text); }
+  .btn.primary { background:#1b2740; border-color:#2c3d66; color:#cfe0ff; }
+  .btn.warnb { background:rgba(210,153,34,.12); border-color:#5a4517; color:var(--amber); }
+  .foot { color:var(--faint); font-size:11px; margin-top:16px; text-align:center; }
+</style>
+</head>
+<body>
+<div class="app dim">
+  <aside class="sidebar">
+    <div class="logo"><div class="logo-mark">A</div><div><b>Ansible GUI</b><span>server management</span></div></div>
+    <div class="nav-sec">維運</div>
+    <nav class="nav">
+      <a href="#" class="active"><span class="ico">▦</span>總覽儀表板</a>
+      <a href="#"><span class="ico">🖥</span>主機</a>
+      <a href="#"><span class="ico">☸</span>叢集</a>
+      <a href="#"><span class="ico">🛠</span>節點維護</a>
+    </nav>
+  </aside>
+  <main class="main">
+    <div class="card"><h2>Worker 節點</h2>
+      <table><tr><th>主機</th><th>K8s 版本</th><th>狀態</th></tr>
+      <tr><td class="mono">k3s-worker-01</td><td class="mono">v1.31.2</td><td><span class="tag t-green">● Ready</span></td></tr>
+      <tr><td class="mono">k3s-worker-02</td><td class="mono">v1.31.2</td><td><span class="tag t-green">● Ready</span></td></tr>
+      <tr><td class="mono">k3s-worker-03</td><td class="mono">v1.30.5</td><td><span class="tag t-amber">▲ 版本漂移</span></td></tr>
+      </table>
+    </div>
+  </main>
+</div>
+
+<div class="scrim"></div>
+<aside class="drawer">
+  <span class="x">✕</span>
+  <h1 class="mono">k3s-worker-03</h1>
+  <div class="sub"><span class="tag t-amber">▲ 版本漂移</span> · 叢集 homelab-k3s · 最後同步 30 秒前</div>
+
+  <div class="sec"><h3>基本資訊</h3>
+    <div class="kv"><span>內網 IP</span><b class="mono">192.168.31.23</b></div>
+    <div class="kv"><span>作業系統</span><b>Ubuntu 22.04.5 LTS</b></div>
+    <div class="kv"><span>Kernel</span><b class="mono">5.15.0-139-generic</b></div>
+    <div class="kv"><span>K8s / kubelet</span><b class="mono">v1.30.5 / v1.30.5</b></div>
+    <div class="kv"><span>containerd</span><b class="mono">1.7.24</b></div>
+    <div class="kv"><span>期望版本</span><b class="mono" style="color:var(--amber)">v1.31.2（漂移）</b></div>
+  </div>
+
+  <div class="sec"><h3>資源</h3>
+    <div class="mrow"><span>CPU（4 核）</span><span>22%</span></div><div class="meter"><i style="width:22%;background:var(--green)"></i></div>
+    <div class="mrow"><span>記憶體（16 GB）</span><span>44%</span></div><div class="meter"><i style="width:44%;background:var(--green)"></i></div>
+    <div class="mrow"><span>磁碟（/ 100 GB）</span><span>71%</span></div><div class="meter"><i style="width:71%;background:var(--amber)"></i></div>
+  </div>
+
+  <div class="sec"><h3>LABELS / TAINTS</h3>
+    <div class="chips">
+      <span class="chip mono">node-role.kubernetes.io/worker=</span>
+      <span class="chip mono">zone=homelab</span>
+      <span class="chip mono">gpu=false</span>
+      <span class="chip" style="border-color:#5a4517;color:var(--amber)">taint: none</span>
+    </div>
+  </div>
+
+  <div class="sec"><h3>CONDITIONS</h3>
+    <div class="kv"><span>Ready</span><b class="ok">True</b></div>
+    <div class="kv"><span>MemoryPressure</span><b class="ok">False</b></div>
+    <div class="kv"><span>DiskPressure</span><b class="ok">False</b></div>
+    <div class="kv"><span>PIDPressure</span><b class="ok">False</b></div>
+  </div>
+
+  <div class="sec"><h3>最近任務</h3>
+    <div class="hist">
+      <div><span class="mono">os-security-update</span><span class="ok">成功 · 09-21</span></div>
+      <div><span class="mono">kubelet-upgrade</span><span class="bad">失敗 · 09-14</span></div>
+      <div><span class="mono">node-init</span><span class="ok">成功 · 08-30</span></div>
+    </div>
+  </div>
+
+  <div class="dact">
+    <button class="btn warnb">🛠 排入維護</button>
+    <button class="btn primary">⛔ Cordon</button>
+    <button class="btn">📋 複製 SSH 指令</button>
+    <button class="btn">📜 匯出節點報告</button>
+  </div>
+  <div class="foot">節點詳情抽屜設計稿 v1 · 數字皆為示意</div>
+</aside>
+</body>
+</html>

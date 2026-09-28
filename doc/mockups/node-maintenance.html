@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>節點維護 — 一鍵工作流（設計稿 v1）</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  :root { --bg:#0b0e14; --panel:#12161f; --panel2:#171c28; --border:#232a3a;
+    --text:#e6e9f0; --muted:#8b93a7; --faint:#5b6378;
+    --green:#3fb950; --amber:#d29922; --red:#f85149; --blue:#58a6ff; --purple:#bc8cff; }
+  body { background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft JhengHei",sans-serif; font-size:13px; }
+  .app { display:flex; min-height:100vh; }
+  .sidebar { width:208px; background:#0d1017; border-right:1px solid var(--border);
+    padding:18px 12px; flex-shrink:0; position:sticky; top:0; height:100vh; }
+  .logo { display:flex; align-items:center; gap:10px; padding:4px 8px 18px; }
+  .logo-mark { width:32px; height:32px; border-radius:8px; background:linear-gradient(135deg,#e6355f,#7a3ff2);
+    display:flex; align-items:center; justify-content:center; font-weight:800; font-size:16px; color:#fff; }
+  .logo b { font-size:14px; display:block; } .logo span { font-size:11px; color:var(--muted); }
+  .nav-sec { font-size:11px; color:var(--faint); padding:12px 10px 6px; letter-spacing:.08em; }
+  .nav a { display:flex; align-items:center; gap:10px; padding:9px 10px; border-radius:8px;
+    color:var(--muted); text-decoration:none; font-size:13px; }
+  .nav a.active { background:#1b2740; color:#fff; }
+  .ico { width:18px; text-align:center; }
+  .badge-n { margin-left:auto; background:#2a3350; color:#bcd; font-size:11px; padding:1px 7px; border-radius:10px; }
+  .main { flex:1; padding:20px 24px 40px; min-width:0; }
+  .topbar { display:flex; align-items:center; gap:12px; margin-bottom:18px; }
+  .cluster-pick { background:var(--panel); border:1px solid var(--border); color:var(--text); border-radius:8px; padding:8px 12px; font-size:13px; }
+  .search { flex:1; max-width:340px; background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:8px 12px; color:var(--muted); }
+  .sp { flex:1; } .bell { position:relative; background:var(--panel); border:1px solid var(--border); border-radius:8px; width:36px; height:36px; display:flex; align-items:center; justify-content:center; }
+  .avatar { width:36px; height:36px; border-radius:50%; background:#2a3350; display:flex; align-items:center; justify-content:center; font-weight:700; }
+
+  .head { display:flex; align-items:center; gap:12px; margin-bottom:4px; }
+  .head h1 { font-size:18px; }
+  .tag { display:inline-block; font-size:11px; padding:3px 10px; border-radius:10px; }
+  .t-blue { background:rgba(88,166,255,.14); color:var(--blue); }
+  .t-green { background:rgba(63,185,80,.14); color:var(--green); }
+  .t-amber { background:rgba(210,153,34,.14); color:var(--amber); }
+  .t-red { background:rgba(248,81,73,.14); color:var(--red); }
+  .t-gray { background:#232a3a; color:var(--muted); }
+  .sub { color:var(--muted); font-size:12px; margin-bottom:14px; }
+  .cfg { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
+  .cfg div { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:8px 14px; font-size:12px; color:var(--muted); }
+  .cfg b { color:var(--text); font-family:ui-monospace,Menlo,monospace; }
+  .actions { margin-left:auto; display:flex; gap:8px; }
+  .btn { border-radius:8px; padding:8px 18px; font-size:13px; cursor:pointer; border:1px solid var(--border); background:var(--panel2); color:var(--text); }
+  .btn.danger { background:rgba(248,81,73,.12); border-color:#5a2326; color:var(--red); }
+  .btn.primary { background:#1b2740; border-color:#2c3d66; color:#cfe0ff; }
+
+  /* stepper */
+  .stepper { display:flex; align-items:center; background:var(--panel); border:1px solid var(--border);
+    border-radius:12px; padding:16px 20px; margin-bottom:12px; }
+  .step { display:flex; align-items:center; gap:8px; flex:1; }
+  .step .n { width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+    font-size:12px; font-weight:700; background:#232a3a; color:var(--muted); flex-shrink:0; }
+  .step.done .n { background:rgba(63,185,80,.18); color:var(--green); }
+  .step.active .n { background:rgba(88,166,255,.18); color:var(--blue); animation:pl 1.6s infinite; }
+  @keyframes pl { 0%,100%{opacity:1} 50%{opacity:.45} }
+  .step .t { font-size:12.5px; } .step.done .t { color:var(--muted); } .step.active .t { color:#fff; font-weight:600; }
+  .conn { flex:1; height:2px; background:#232a3a; margin:0 10px; min-width:16px; }
+  .conn.done { background:var(--green); }
+
+  .grid { display:grid; grid-template-columns:1fr 340px; gap:12px; align-items:start; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:12px; }
+  .card h2 { font-size:14px; margin-bottom:12px; }
+  .node { background:var(--panel2); border:1px solid var(--border); border-radius:10px; padding:12px 14px; margin-bottom:10px; }
+  .node.cur { border-color:var(--blue); }
+  .node.fail { border-color:var(--red); }
+  .node .row1 { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+  .mono { font-family:ui-monospace,Menlo,monospace; font-size:12.5px; font-weight:600; }
+  .node .st { margin-left:auto; font-size:12px; }
+  .bar { height:6px; background:#0b0e14; border-radius:3px; overflow:hidden; }
+  .bar i { display:block; height:100%; border-radius:3px; }
+  .node .meta { display:flex; justify-content:space-between; font-size:11.5px; color:var(--muted); margin-top:6px; }
+  .ok { color:var(--green); } .warn { color:var(--amber); } .bad { color:var(--red); } .run { color:var(--blue); }
+
+  .check { display:flex; gap:10px; align-items:flex-start; padding:8px 0; border-bottom:1px solid #1a2030; font-size:12.5px; }
+  .check:last-child { border:none; }
+  .check small { color:var(--muted); display:block; font-size:11.5px; }
+  .log { background:#080a0f; border:1px solid var(--border); border-radius:8px; padding:10px 12px;
+    font-family:ui-monospace,Menlo,monospace; font-size:11.5px; line-height:1.7; color:#9fb3c8;
+    max-height:230px; overflow:hidden; }
+  .log .g { color:var(--green); } .log .y { color:var(--amber); } .log .b { color:var(--blue); } .log .r { color:var(--red); }
+  .foot { color:var(--faint); font-size:11px; margin-top:14px; text-align:center; }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="logo"><div class="logo-mark">A</div><div><b>Ansible GUI</b><span>server management</span></div></div>
+    <div class="nav-sec">維運</div>
+    <nav class="nav">
+      <a href="#"><span class="ico">▦</span>總覽儀表板</a>
+      <a href="#"><span class="ico">🖥</span>主機 <span class="badge-n">14</span></a>
+      <a href="#"><span class="ico">☸</span>叢集 <span class="badge-n">2</span></a>
+      <a href="#" class="active"><span class="ico">🛠</span>節點維護 <span class="badge-n">3</span></a>
+    </nav>
+    <div class="nav-sec">自動化</div>
+    <nav class="nav">
+      <a href="#"><span class="ico">📜</span>Playbook</a>
+      <a href="#"><span class="ico">▶</span>任務</a>
+      <a href="#"><span class="ico">⏱</span>排程</a>
+    </nav>
+    <div class="nav-sec">系統</div>
+    <nav class="nav"><a href="#"><span class="ico">🔑</span>憑證</a><a href="#"><span class="ico">⚙</span>設定</a></nav>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <select class="cluster-pick"><option>☸ homelab-k3s（主要）</option><option>☸ lab-rke2</option></select>
+      <input class="search" placeholder="搜尋主機、任務、節點…"><div class="sp"></div>
+      <div class="bell">🔔</div><div class="avatar">D</div>
+    </div>
+
+    <div class="head">
+      <h1>節點維護 — kubelet 升級 <span class="mono" style="font-size:14px">v1.30.5 → v1.31.2</span></h1>
+      <span class="tag t-blue">● 執行中</span>
+      <div class="actions"><button class="btn primary">⏸ 暫停</button><button class="btn danger">■ 中止整批</button></div>
+    </div>
+    <div class="sub">Workflow：node-maintenance · 由 Dylan 於 22:41 啟動 · 資料為設計示意</div>
+
+    <div class="cfg">
+      <div>目標 <b>4 台</b></div><div>策略 <b>逐台 serial=1</b></div>
+      <div>失敗處理 <b>整批暫停</b></div><div>drain timeout <b>300s</b></div>
+      <div>已用 <b>18:24</b></div><div>預計完成 <b>23:05</b></div>
+    </div>
+
+    <div class="stepper">
+      <div class="step done"><div class="n">✓</div><div class="t">前置檢查</div></div><div class="conn done"></div>
+      <div class="step done"><div class="n">✓</div><div class="t">Cordon</div></div><div class="conn done"></div>
+      <div class="step done"><div class="n">✓</div><div class="t">Drain</div></div><div class="conn done"></div>
+      <div class="step active"><div class="n">4</div><div class="t">升級 kubelet</div></div><div class="conn"></div>
+      <div class="step"><div class="n">5</div><div class="t">健康驗證</div></div><div class="conn"></div>
+      <div class="step"><div class="n">6</div><div class="t">Uncordon</div></div>
+    </div>
+    <div class="sub" style="margin-top:-6px">目前步驟針對節點 <span class="mono">k3s-worker-03</span>（第 3/4 台）</div>
+
+    <div class="grid">
+      <div>
+        <div class="card">
+          <h2>節點佇列 <span style="color:var(--muted);font-weight:400;font-size:12px">— 逐台執行，任一失敗整批暫停</span></h2>
+          <div class="node">
+            <div class="row1"><span class="mono">k3s-worker-01</span><span class="st ok">✓ 完成 · 6/6 步驟</span></div>
+            <div class="bar"><i style="width:100%;background:var(--green)"></i></div>
+            <div class="meta"><span>v1.30.5 → v1.31.2</span><span>耗時 5:42</span></div>
+          </div>
+          <div class="node">
+            <div class="row1"><span class="mono">k3s-worker-02</span><span class="st ok">✓ 完成 · 6/6 步驟</span></div>
+            <div class="bar"><i style="width:100%;background:var(--green)"></i></div>
+            <div class="meta"><span>v1.30.5 → v1.31.2</span><span>耗時 6:10</span></div>
+          </div>
+          <div class="node cur">
+            <div class="row1"><span class="mono">k3s-worker-03</span><span class="st run">● 執行中 · 步驟 4/6（升級 kubelet）</span></div>
+            <div class="bar"><i style="width:62%;background:var(--blue)"></i></div>
+            <div class="meta"><span>apt 安裝 kubelet=1.31.2 中…</span><span>已用 3:18</span></div>
+          </div>
+          <div class="node">
+            <div class="row1"><span class="mono">k3s-worker-04</span><span class="st" style="color:var(--muted)">○ 等待中</span></div>
+            <div class="bar"><i style="width:0%;background:var(--blue)"></i></div>
+            <div class="meta"><span>v1.30.5 → v1.31.2</span><span>預估 6:00</span></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>即時日誌 <span style="color:var(--muted);font-weight:400;font-size:12px">— k3s-worker-03</span></h2>
+          <div class="log">
+            <div><span class="b">TASK</span> [cordon] 標記節點不可調度</div>
+            <div><span class="g">changed</span>: [k3s-worker-03] => cordoned</div>
+            <div><span class="b">TASK</span> [drain] 驅逐 Pods（timeout 300s）</div>
+            <div><span class="g">changed</span>: [k3s-worker-03] => 11 pods evicted, 0 blocked by PDB</div>
+            <div><span class="b">TASK</span> [upgrade] apt 安裝 kubelet=1.31.2</div>
+            <div><span class="y">…</span> 下載中 62%（41 MB / 66 MB）</div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <h2>前置檢查 <span class="tag t-green" style="margin-left:6px">5/6 通過</span></h2>
+          <div class="check"><span class="ok">✓</span><div>Control plane 健康<small>3/3 節點 Ready · etcd 正常</small></div></div>
+          <div class="check"><span class="ok">✓</span><div>PDB 阻擋分析<small>2 個 PDB 會延遲但不會阻擋 drain</small></div></div>
+          <div class="check"><span class="warn">⚠</span><div>單副本 workload<small>prometheus-0、loki-0 無備援，維護期間監控短暫中斷</small></div></div>
+          <div class="check"><span class="ok">✓</span><div>磁碟空間<small>4 台皆 &gt; 20% 可用</small></div></div>
+          <div class="check"><span class="ok">✓</span><div>版本相容<small>control plane v1.31.2 ↔ kubelet 目標 v1.31.2（±1 規則通過）</small></div></div>
+          <div class="check"><span class="ok">✓</span><div>SSH 連通<small>4/4 可達</small></div></div>
+        </div>
+        <div class="card">
+          <h2>失敗處理預覽</h2>
+          <div style="font-size:12.5px;color:var(--muted);line-height:1.8">
+            任一節點失敗時整批暫停，可選：<br>
+            <span class="ok">↻ 重試本台</span> · <span class="warn">⏭ 跳過本台</span> · <span class="bad">■ 中止整批</span><br>
+            已完成的節點不會重跑。
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="foot">Ansible GUI · 節點維護頁設計稿 v1 · 數字皆為示意</div>
+  </main>
+</div>
+</body>
+</html>
