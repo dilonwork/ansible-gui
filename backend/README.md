@@ -28,6 +28,16 @@ docker compose up --build
 - `GET /api/jobs/{job_id}` → 任務狀態＋事件歷史
 - `WS /ws/jobs/{job_id}` → 即時事件串流（先補歷史再串流）
 
+## 測試
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest tests/ -q
+```
+
+L1 API 測試（不依賴 sshd，可進 CI）：見 `doc/testing.md` 的完整測試方案。
+E2E smoke（需本機 sshd）：`./scripts/e2e_smoke.sh`（從 repo 根目錄跑）。
+
 ## 安全設計（已做）
 
 - SSH 私鑰只在執行時寫成 600 暫存檔，跑完即刪

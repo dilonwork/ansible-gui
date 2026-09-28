@@ -18,21 +18,24 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from contextlib import asynccontextmanager
 
 from .runner_service import run_ping_job
 
-app = FastAPI(title="Ansible GUI (skeleton)")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global loop
+    loop = asyncio.get_running_loop()
+    yield
+
+
+app = FastAPI(title="Ansible GUI (skeleton)", lifespan=lifespan)
 
 hosts: dict[str, dict] = {}
 jobs: dict[str, dict] = {}
 ws_queues: dict[str, list[asyncio.Queue]] = {}  # job_id -> [queues]
 loop: asyncio.AbstractEventLoop | None = None
-
-
-@app.on_event("startup")
-async def _startup():
-    global loop
-    loop = asyncio.get_running_loop()
 
 
 # ---------- models ----------
