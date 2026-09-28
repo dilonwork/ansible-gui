@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Job detail v2 — mockup</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,"Segoe UI",Roboto,sans-serif}
+body{background:#0d1220;color:#e6eaf2;display:flex;min-height:100vh}
+aside{width:210px;background:#111828;padding:18px 12px;flex-shrink:0}
+.logo{display:flex;align-items:center;gap:10px;padding:4px 8px 16px}
+.logo .mark{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,#f59e0b,#ec4899);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px}
+.logo b{font-size:14px}.logo small{color:#8b93a7;font-size:11px;display:block}
+.nav-sec{color:#5b6378;font-size:11px;text-transform:uppercase;letter-spacing:.06em;padding:14px 10px 6px}
+.nav-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;color:#aab3c5;font-size:13px}
+.nav-item.active{background:#1c2740;color:#fff}
+.nav-item .cnt{margin-left:auto;font-size:11px;background:#2a3552;border-radius:10px;padding:1px 8px}
+main{flex:1;padding:22px 26px;max-width:1240px}
+.topbar{display:flex;gap:12px;align-items:center;margin-bottom:18px}
+select,.search{background:#161e31;border:1px solid #26314d;color:#e6eaf2;border-radius:8px;padding:8px 12px;font-size:13px}
+.search{flex:1;max-width:420px}
+.bell{width:36px;height:36px;border-radius:9px;background:#161e31;border:1px solid #26314d;display:flex;align-items:center;justify-content:center;margin-left:auto}
+.avatar{width:36px;height:36px;border-radius:50%;background:#3b4a6b;display:flex;align-items:center;justify-content:center;font-weight:700}
+.crumb{color:#8b93a7;font-size:12px;margin-bottom:6px}
+h1{font-size:20px;display:flex;align-items:center;gap:12px}
+.badge{font-size:12px;padding:4px 12px;border-radius:20px;background:#1d3a5f;color:#6db3f2;border:1px solid #2c5282}
+.actions{margin-left:auto;display:flex;gap:8px}
+.btn{border-radius:8px;padding:8px 14px;font-size:13px;border:1px solid #2c3a5e;background:#1a2340;color:#e6eaf2;cursor:pointer}
+.btn.danger{background:#3a1d22;border-color:#7a2e35;color:#ff8a94}
+.btn.primary{background:#1d4ed8;border-color:#1d4ed8}
+.meta{color:#8b93a7;font-size:12px;margin:8px 0 16px}
+.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:14px}
+.stat{background:#111828;border:1px solid #232d47;border-radius:12px;padding:14px 16px}
+.stat .k{font-size:11px;color:#8b93a7;text-transform:uppercase;letter-spacing:.05em}
+.stat .v{font-size:24px;font-weight:700;margin-top:6px}
+.v.g{color:#4ade80}.v.r{color:#ff8a94}.v.b{color:#6db3f2}
+.card{background:#111828;border:1px solid #232d47;border-radius:12px;padding:16px 18px;margin-bottom:14px}
+.card h3{font-size:14px;margin-bottom:12px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{color:#8b93a7;font-weight:500;text-align:left;padding:8px 10px;font-size:12px;border-bottom:1px solid #232d47}
+td{padding:10px;border-bottom:1px solid #1b2340}
+td.num{text-align:right;font-family:ui-monospace,Menlo,monospace}
+.st{font-size:12px}.st.ok{color:#4ade80}.st.run{color:#6db3f2}.st.wait{color:#5b6378}.st.fail{color:#ff8a94}
+.cur{font-size:12px;color:#aab3c5;font-family:ui-monospace,Menlo,monospace}
+.log{background:#0a0e18;border-radius:8px;padding:14px;font-family:ui-monospace,Menlo,monospace;font-size:12px;line-height:1.8;color:#9aa4bb}
+.log .t{color:#6db3f2}.log .c{color:#4ade80}.log .w{color:#fbbf24}
+.filters{display:flex;gap:8px;margin-bottom:10px}
+.filters select{font-size:12px;padding:6px 10px}
+</style></head>
+<body>
+<aside>
+<div class="logo"><div class="mark">A</div><div><b>Ansible GUI</b><small>server management</small></div></div>
+<div class="nav-sec">Operate</div>
+<div class="nav-item">▦ Dashboard</div>
+<div class="nav-item">🖥 Hosts <span class="cnt">14</span></div>
+<div class="nav-item">⎈ Clusters <span class="cnt">2</span></div>
+<div class="nav-item">🛠 Node maintenance <span class="cnt">3</span></div>
+<div class="nav-sec">Automate</div>
+<div class="nav-item">📦 Projects</div>
+<div class="nav-item">📜 Playbooks</div>
+<div class="nav-item active">▶ Jobs <span class="cnt">1</span></div>
+<div class="nav-item">◷ Schedules</div>
+<div class="nav-sec">System</div>
+<div class="nav-item">🔑 Credentials</div>
+<div class="nav-item">⚙ Settings</div>
+</aside>
+<main>
+<div class="topbar"><select><option>⎈ homelab-k3s (primary)</option></select><input class="search" placeholder="Search hosts, jobs, nodes…"><div class="bell">🔔</div><div class="avatar">D</div></div>
+<div class="crumb">Jobs / #128</div>
+<h1>os-security-update <span class="badge">● Running</span>
+<span class="actions"><button class="btn danger">■ Cancel</button><button class="btn">↻ Retry failed nodes</button><button class="btn">⭳ Download log</button><button class="btn primary">⧉ Relaunch as new</button></span></h1>
+<div class="meta">Job template · target <b>patch-group</b> (9 hosts) · started by Dylan at 22:26:04 · playbook <span style="font-family:ui-monospace,Menlo,monospace;color:#fbbf24">a3f9c1d</span> · worker celery@w1 · forks=5</div>
+<div class="stats">
+<div class="stat"><div class="k">Target hosts</div><div class="v">9</div></div>
+<div class="stat"><div class="k">Succeeded</div><div class="v g">6</div></div>
+<div class="stat"><div class="k">Failed</div><div class="v r">0</div></div>
+<div class="stat"><div class="k">Running</div><div class="v b">3</div></div>
+<div class="stat"><div class="k">Elapsed</div><div class="v">04:12</div></div>
+</div>
+<div class="card"><h3>Host result matrix</h3><table>
+<tr><th>Host</th><th>Status</th><th style="text-align:right">ok</th><th style="text-align:right">changed</th><th style="text-align:right">failed</th><th style="text-align:right">Duration</th><th>Current task</th></tr>
+<tr><td>k3s-worker-01</td><td class="st ok">✓ Succeeded</td><td class="num">8</td><td class="num">3</td><td class="num">0</td><td class="num">3:58</td><td class="cur">—</td></tr>
+<tr><td>k3s-worker-02</td><td class="st ok">✓ Succeeded</td><td class="num">8</td><td class="num">5</td><td class="num">0</td><td class="num">4:02</td><td class="cur">—</td></tr>
+<tr><td>k3s-worker-03</td><td class="st run">● Running</td><td class="num">4</td><td class="num">2</td><td class="num">0</td><td class="num">2:41</td><td class="cur">[verify] waiting for node Ready</td></tr>
+<tr><td>rke2-worker-01</td><td class="st run">● Running</td><td class="num">6</td><td class="num">1</td><td class="num">0</td><td class="num">1:12</td><td class="cur">[patch] running apt upgrade</td></tr>
+<tr><td>rke2-worker-02</td><td class="st wait">○ Queued</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="cur">queued (forks=5)</td></tr>
+</table></div>
+<div class="card"><h3>Live log</h3>
+<div class="filters"><select><option>All hosts</option></select><select><option>Keyword filter (e.g. failed)</option></select><select><option>↓ Auto-scroll: on</option></select></div>
+<div class="log">
+<span class="w">[22:26:04]</span> <span class="t">PLAY [OS security update]</span> ********************************<br>
+<span class="t">TASK [patch] gather upgradable packages</span><br>
+<span class="c">ok: [k3s-worker-01] | ok: [k3s-worker-02] | ok: [rke2-worker-01]</span><br>
+<span class="t">TASK [patch] run apt upgrade (security only)</span><br>
+<span class="c">changed: [k3s-worker-01] =&gt; 11 updated</span><br>
+<span class="c">changed: [k3s-worker-02] =&gt; 14 updated</span><br>
+<span class="t">TASK [patch] check reboot required</span><br>
+<span class="c">ok: [k3s-worker-01] =&gt; reboot_required=false</span><br>
+<span class="t">TASK [verify] wait for node Ready</span><br>
+<span class="w">… [k3s-worker-03] waiting 02:41</span>
+</div></div>
+</main></body></html>

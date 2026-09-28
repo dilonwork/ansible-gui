@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Projects — mockup</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,"Segoe UI",Roboto,sans-serif}
+body{background:#0d1220;color:#e6eaf2;display:flex;min-height:100vh}
+aside{width:210px;background:#111828;padding:18px 12px;flex-shrink:0}
+.logo{display:flex;align-items:center;gap:10px;padding:4px 8px 16px}
+.logo .mark{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,#f59e0b,#ec4899);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px}
+.logo b{font-size:14px}.logo small{color:#8b93a7;font-size:11px;display:block}
+.nav-sec{color:#5b6378;font-size:11px;text-transform:uppercase;letter-spacing:.06em;padding:14px 10px 6px}
+.nav-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;color:#aab3c5;font-size:13px}
+.nav-item.active{background:#1c2740;color:#fff}
+.nav-item .cnt{margin-left:auto;font-size:11px;background:#2a3552;border-radius:10px;padding:1px 8px}
+main{flex:1;padding:22px 26px;max-width:1240px}
+.topbar{display:flex;gap:12px;align-items:center;margin-bottom:18px}
+select,.search{background:#161e31;border:1px solid #26314d;color:#e6eaf2;border-radius:8px;padding:8px 12px;font-size:13px}
+.search{flex:1;max-width:420px}
+.bell{width:36px;height:36px;border-radius:9px;background:#161e31;border:1px solid #26314d;display:flex;align-items:center;justify-content:center;margin-left:auto}
+.avatar{width:36px;height:36px;border-radius:50%;background:#3b4a6b;display:flex;align-items:center;justify-content:center;font-weight:700}
+h1{font-size:20px;display:flex;align-items:center}
+.btn{border-radius:8px;padding:8px 16px;font-size:13px;border:1px solid #2c3a5e;background:#1a2340;color:#e6eaf2;cursor:pointer;margin-left:auto}
+.btn.primary{background:#1d4ed8;border-color:#1d4ed8}
+.sub{color:#8b93a7;font-size:12px;margin:8px 0 16px}
+.grid{display:grid;grid-template-columns:380px 1fr;gap:14px}
+.card{background:#111828;border:1px solid #232d47;border-radius:12px;padding:16px 18px;margin-bottom:14px}
+.card h3{font-size:14px;margin-bottom:12px}
+.proj{border:1px solid #26314d;border-radius:10px;padding:12px 14px;margin-bottom:10px;background:#141b2e;cursor:pointer}
+.proj.sel{border-color:#3b82f6}
+.proj .nm{font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px}
+.proj .url{font-size:11px;color:#8b93a7;font-family:ui-monospace,Menlo,monospace;margin:6px 0}
+.proj .row{display:flex;gap:8px;align-items:center;font-size:11px;color:#aab3c5}
+.pill{font-size:11px;padding:2px 10px;border-radius:12px}
+.pill.g{background:#123a24;color:#4ade80}.pill.b{background:#1d3a5f;color:#6db3f2}.pill.r{background:#3a1d22;color:#ff8a94}
+.sync{margin-left:auto;font-size:12px;color:#6db3f2}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{color:#8b93a7;font-weight:500;text-align:left;padding:8px 10px;font-size:12px;border-bottom:1px solid #232d47}
+td{padding:10px;border-bottom:1px solid #1b2340}
+td.mono{font-family:ui-monospace,Menlo,monospace;font-size:12px}
+.commit{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#fbbf24;background:#2a2118;padding:2px 8px;border-radius:6px}
+.note{font-size:12px;color:#8b93a7;line-height:1.8;background:#141b2e;border:1px dashed #2a3552;border-radius:10px;padding:12px 14px;margin-top:4px}
+.note b{color:#e6eaf2}
+</style></head>
+<body>
+<aside>
+<div class="logo"><div class="mark">A</div><div><b>Ansible GUI</b><small>server management</small></div></div>
+<div class="nav-sec">Operate</div>
+<div class="nav-item">▦ Dashboard</div>
+<div class="nav-item">🖥 Hosts <span class="cnt">14</span></div>
+<div class="nav-item">⎈ Clusters <span class="cnt">2</span></div>
+<div class="nav-item">🛠 Node maintenance <span class="cnt">3</span></div>
+<div class="nav-sec">Automate</div>
+<div class="nav-item active">📦 Projects</div>
+<div class="nav-item">📜 Playbooks</div>
+<div class="nav-item">▶ Jobs <span class="cnt">1</span></div>
+<div class="nav-item">◷ Schedules</div>
+<div class="nav-sec">System</div>
+<div class="nav-item">🔑 Credentials</div>
+<div class="nav-item">⚙ Settings</div>
+</aside>
+<main>
+<div class="topbar"><select><option>⎈ homelab-k3s (primary)</option></select><input class="search" placeholder="Search hosts, jobs, nodes…"><div class="bell">🔔</div><div class="avatar">D</div></div>
+<h1>Projects <button class="btn primary">+ Add project</button></h1>
+<div class="sub">Git is the source of truth for playbooks. Templates pin a commit; jobs freeze the content at launch.</div>
+<div class="grid"><div>
+<div class="proj sel"><div class="nm">📦 homelab-ops <span class="pill g">synced</span></div><div class="url">git@github.com:dilonwork/homelab-ops.git</div><div class="row"><span>branch <b>main</b></span><span>·</span><span>2 min ago</span><span class="sync">↻ Sync</span></div></div>
+<div class="proj"><div class="nm">📦 k8s-maintenance <span class="pill g">synced</span></div><div class="url">git@github.com:dilonwork/k8s-maintenance.git</div><div class="row"><span>branch <b>main</b></span><span>·</span><span>1 h ago</span><span class="sync">↻ Sync</span></div></div>
+<div class="proj"><div class="nm">📦 tsmc-cim-playbooks <span class="pill r">sync failed</span></div><div class="url">git@github.com:dilonwork/tsmc-cim-playbooks.git</div><div class="row"><span>auth: deploy key expired</span><span class="sync">↻ Retry</span></div></div>
+</div><div>
+<div class="card"><h3>homelab-ops — playbooks <span style="color:#8b93a7;font-weight:400">main @ <span class="commit">a3f9c1d</span></span></h3>
+<table><tr><th>Path</th><th>Last commit</th><th>Used by</th></tr>
+<tr><td class="mono">playbooks/patch-os.yml</td><td class="mono">a3f9c1d · 2 days ago</td><td>tpl os-patch-weekly</td></tr>
+<tr><td class="mono">playbooks/upgrade-kubelet.yml</td><td class="mono">7e2b410 · 5 days ago</td><td>workflow node-maintenance</td></tr>
+<tr><td class="mono">playbooks/gather-facts.yml</td><td class="mono">a3f9c1d · 2 days ago</td><td>tpl nightly-facts</td></tr>
+<tr><td class="mono">playbooks/harden-ssh.yml</td><td class="mono">c91d0e2 · 3 weeks ago</td><td>—</td></tr>
+</table></div>
+<div class="note"><b>How pinning works:</b> a template references <span class="commit">playbook @ commit</span>. A job freezes the exact file content at launch, so later pushes never change a running job. Re-sync pulls new commits; templates keep pointing at the pinned one until you move the pin.</div>
+</div></div>
+</main></body></html>

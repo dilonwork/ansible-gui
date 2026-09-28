@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Schedules — mockup</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,"Segoe UI",Roboto,sans-serif}
+body{background:#0d1220;color:#e6eaf2;display:flex;min-height:100vh}
+aside{width:210px;background:#111828;padding:18px 12px;flex-shrink:0}
+.logo{display:flex;align-items:center;gap:10px;padding:4px 8px 16px}
+.logo .mark{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,#f59e0b,#ec4899);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px}
+.logo b{font-size:14px}.logo small{color:#8b93a7;font-size:11px;display:block}
+.nav-sec{color:#5b6378;font-size:11px;text-transform:uppercase;letter-spacing:.06em;padding:14px 10px 6px}
+.nav-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;color:#aab3c5;font-size:13px}
+.nav-item.active{background:#1c2740;color:#fff}
+.nav-item .cnt{margin-left:auto;font-size:11px;background:#2a3552;border-radius:10px;padding:1px 8px}
+main{flex:1;padding:22px 26px;max-width:1240px}
+.topbar{display:flex;gap:12px;align-items:center;margin-bottom:18px}
+select,.search{background:#161e31;border:1px solid #26314d;color:#e6eaf2;border-radius:8px;padding:8px 12px;font-size:13px}
+.search{flex:1;max-width:420px}
+.bell{width:36px;height:36px;border-radius:9px;background:#161e31;border:1px solid #26314d;display:flex;align-items:center;justify-content:center;margin-left:auto}
+.avatar{width:36px;height:36px;border-radius:50%;background:#3b4a6b;display:flex;align-items:center;justify-content:center;font-weight:700}
+h1{font-size:20px;display:flex;align-items:center}
+.btn{border-radius:8px;padding:8px 16px;font-size:13px;border:1px solid #2c3a5e;background:#1a2340;color:#e6eaf2;cursor:pointer;margin-left:auto}
+.btn.primary{background:#1d4ed8;border-color:#1d4ed8}
+.sub{color:#8b93a7;font-size:12px;margin:8px 0 16px}
+.card{background:#111828;border:1px solid #232d47;border-radius:12px;padding:16px 18px;margin-bottom:14px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{color:#8b93a7;font-weight:500;text-align:left;padding:8px 10px;font-size:12px;border-bottom:1px solid #232d47}
+td{padding:12px 10px;border-bottom:1px solid #1b2340;vertical-align:middle}
+td.mono{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#aab3c5}
+.nm{font-weight:600;font-size:13px}.nm small{display:block;color:#8b93a7;font-weight:400;font-size:11px;margin-top:3px}
+.pill{font-size:11px;padding:3px 11px;border-radius:12px}
+.pill.g{background:#123a24;color:#4ade80}.pill.r{background:#3a1d22;color:#ff8a94}.pill.gr{background:#232d47;color:#8b93a7}
+.tgl{width:40px;height:22px;border-radius:12px;background:#22c55e;position:relative;display:inline-block}
+.tgl.off{background:#3a4560}.tgl:after{content:"";position:absolute;width:16px;height:16px;border-radius:50%;background:#fff;top:3px;left:22px}
+.tgl.off:after{left:3px}
+.note{font-size:12px;color:#8b93a7;line-height:1.8;background:#141b2e;border:1px dashed #2a3552;border-radius:10px;padding:12px 14px;margin-top:4px}
+.note b{color:#e6eaf2}
+</style></head>
+<body>
+<aside>
+<div class="logo"><div class="mark">A</div><div><b>Ansible GUI</b><small>server management</small></div></div>
+<div class="nav-sec">Operate</div>
+<div class="nav-item">▦ Dashboard</div>
+<div class="nav-item">🖥 Hosts <span class="cnt">14</span></div>
+<div class="nav-item">⎈ Clusters <span class="cnt">2</span></div>
+<div class="nav-item">🛠 Node maintenance <span class="cnt">3</span></div>
+<div class="nav-sec">Automate</div>
+<div class="nav-item">📦 Projects</div>
+<div class="nav-item">📜 Playbooks</div>
+<div class="nav-item">▶ Jobs <span class="cnt">1</span></div>
+<div class="nav-item active">◷ Schedules</div>
+<div class="nav-sec">System</div>
+<div class="nav-item">🔑 Credentials</div>
+<div class="nav-item">⚙ Settings</div>
+</aside>
+<main>
+<div class="topbar"><select><option>⎈ homelab-k3s (primary)</option></select><input class="search" placeholder="Search hosts, jobs, nodes…"><div class="bell">🔔</div><div class="avatar">D</div></div>
+<h1>Schedules <button class="btn primary">+ New schedule</button></h1>
+<div class="sub">Recurring runs of job templates. A schedule launches the pinned template + commit, exactly like a manual launch.</div>
+<div class="card"><table>
+<tr><th>Schedule</th><th>Template</th><th>Cron</th><th>Next run</th><th>Last run</th><th>Enabled</th></tr>
+<tr><td><div class="nm">weekly-os-patch<small>patch-group · check mode off</small></div></td><td>os-patch-weekly</td><td class="mono">0 2 * * 0</td><td>Sun 02:00</td><td><span class="pill g">successful</span></td><td><span class="tgl"></span></td></tr>
+<tr><td><div class="nm">nightly-facts<small>all hosts · read-only</small></div></td><td>gather-facts</td><td class="mono">30 3 * * *</td><td>tomorrow 03:30</td><td><span class="pill g">successful</span></td><td><span class="tgl"></span></td></tr>
+<tr><td><div class="nm">monthly-reboot-window<small>patch-group · needs approval</small></div></td><td>reboot-after-patch</td><td class="mono">0 4 1 * *</td><td>Oct 1, 04:00</td><td><span class="pill gr">never</span></td><td><span class="tgl off"></span></td></tr>
+<tr><td><div class="nm">kubelet-drift-check<small>k8s workers · dry run</small></div></td><td>upgrade-kubelet</td><td class="mono">0 6 * * 1</td><td>Mon 06:00</td><td><span class="pill r">failed</span></td><td><span class="tgl"></span></td></tr>
+</table></div>
+<div class="note"><b>Rules:</b> schedules never edit a template — they launch the pinned commit as-is. Missed runs (backend down) are marked <b>missed</b>, not silently skipped. A schedule can require approval, in which case the run waits in the approvals queue instead of executing.</div>
+</main></body></html>

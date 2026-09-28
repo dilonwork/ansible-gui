@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Node maintenance — mockup</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,"Segoe UI",Roboto,sans-serif}
+body{background:#0d1220;color:#e6eaf2;display:flex;min-height:100vh}
+aside{width:210px;background:#111828;padding:18px 12px;flex-shrink:0}
+.logo{display:flex;align-items:center;gap:10px;padding:4px 8px 16px}
+.logo .mark{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,#f59e0b,#ec4899);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px}
+.logo b{font-size:14px}.logo small{color:#8b93a7;font-size:11px;display:block}
+.nav-sec{color:#5b6378;font-size:11px;text-transform:uppercase;letter-spacing:.06em;padding:14px 10px 6px}
+.nav-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;color:#aab3c5;font-size:13px}
+.nav-item.active{background:#1c2740;color:#fff}
+.nav-item .cnt{margin-left:auto;font-size:11px;background:#2a3552;border-radius:10px;padding:1px 8px}
+main{flex:1;padding:22px 26px;max-width:1240px}
+.topbar{display:flex;gap:12px;align-items:center;margin-bottom:18px}
+select,.search{background:#161e31;border:1px solid #26314d;color:#e6eaf2;border-radius:8px;padding:8px 12px;font-size:13px}
+.search{flex:1;max-width:420px}
+.bell,.avatar{margin-left:auto}
+.bell{width:36px;height:36px;border-radius:9px;background:#161e31;border:1px solid #26314d;display:flex;align-items:center;justify-content:center}
+.avatar{width:36px;height:36px;border-radius:50%;background:#3b4a6b;display:flex;align-items:center;justify-content:center;font-weight:700}
+h1{font-size:20px;display:flex;align-items:center;gap:12px}
+.badge{font-size:12px;padding:4px 12px;border-radius:20px;background:#1d3a5f;color:#6db3f2;border:1px solid #2c5282}
+.meta{color:#8b93a7;font-size:12px;margin:8px 0 14px}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.chip{background:#161e31;border:1px solid #26314d;border-radius:8px;padding:7px 12px;font-size:12px;color:#aab3c5}
+.chip b{color:#fff}
+.actions{margin-left:auto;display:flex;gap:8px}
+.btn{border-radius:8px;padding:8px 16px;font-size:13px;border:1px solid #2c3a5e;background:#1a2340;color:#e6eaf2;cursor:pointer}
+.btn.danger{background:#3a1d22;border-color:#7a2e35;color:#ff8a94}
+.steps{display:flex;align-items:center;gap:0;background:#111828;border:1px solid #232d47;border-radius:12px;padding:18px 22px;margin-bottom:14px}
+.step{display:flex;align-items:center;gap:10px}
+.dot{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0}
+.dot.done{background:#14532d;color:#4ade80}.dot.now{background:#1d3a5f;color:#6db3f2;border:2px solid #3b82f6}.dot.todo{background:#232d47;color:#5b6378}
+.step .lbl{font-size:13px}.step .lbl small{display:block;color:#8b93a7;font-size:11px}
+.line{flex:1;height:2px;background:#2a3552;margin:0 12px;min-width:20px}
+.line.done{background:#22c55e}
+.sub{color:#8b93a7;font-size:12px;margin:2px 0 12px}
+.grid{display:grid;grid-template-columns:1fr 340px;gap:14px}
+.card{background:#111828;border:1px solid #232d47;border-radius:12px;padding:16px 18px;margin-bottom:14px}
+.card h3{font-size:14px;margin-bottom:12px}
+.node{border:1px solid #26314d;border-radius:10px;padding:12px 14px;margin-bottom:10px;background:#141b2e}
+.node .row1{display:flex;align-items:center;gap:10px}
+.node .nm{font-weight:600;font-size:13px}
+.node .st{margin-left:auto;font-size:12px}
+.st.ok{color:#4ade80}.st.run{color:#6db3f2}.st.wait{color:#5b6378}
+.bar{height:6px;background:#232d47;border-radius:4px;margin:10px 0 6px;overflow:hidden}
+.bar i{display:block;height:100%;border-radius:4px}
+.bar i.g{background:#22c55e}.bar i.b{background:#3b82f6}
+.node .row2{display:flex;justify-content:space-between;font-size:11px;color:#8b93a7}
+.check{display:flex;gap:10px;padding:9px 0;border-bottom:1px solid #1b2340;font-size:13px}
+.check:last-child{border:none}
+.check .ic{flex-shrink:0;font-weight:700}
+.ic.g{color:#4ade80}.ic.a{color:#fbbf24}
+.check small{display:block;color:#8b93a7;font-size:11px;margin-top:2px}
+.pol{font-size:13px;color:#aab3c5;line-height:1.9}
+.pol .g{color:#4ade80}.pol .b{color:#6db3f2}.pol .r{color:#ff8a94}
+.log{background:#0a0e18;border-radius:8px;padding:14px;font-family:ui-monospace,Menlo,monospace;font-size:12px;line-height:1.8;color:#9aa4bb}
+.log .t{color:#6db3f2}.log .c{color:#4ade80}.log .w{color:#fbbf24}
+</style></head>
+<body>
+<aside>
+<div class="logo"><div class="mark">A</div><div><b>Ansible GUI</b><small>server management</small></div></div>
+<div class="nav-sec">Operate</div>
+<div class="nav-item">▦ Dashboard</div>
+<div class="nav-item">🖥 Hosts <span class="cnt">14</span></div>
+<div class="nav-item">⎈ Clusters <span class="cnt">2</span></div>
+<div class="nav-item active">🛠 Node maintenance <span class="cnt">3</span></div>
+<div class="nav-sec">Automate</div>
+<div class="nav-item">📜 Playbooks</div>
+<div class="nav-item">▶ Jobs <span class="cnt">1</span></div>
+<div class="nav-item">◷ Schedules</div>
+<div class="nav-sec">System</div>
+<div class="nav-item">🔑 Credentials</div>
+<div class="nav-item">⚙ Settings</div>
+</aside>
+<main>
+<div class="topbar"><select><option>⎈ homelab-k3s (primary)</option></select><input class="search" placeholder="Search hosts, jobs, nodes…"><div class="bell">🔔</div><div class="avatar">D</div></div>
+<h1>Node maintenance — kubelet upgrade v1.30.5 → v1.31.2 <span class="badge">● Running</span>
+<span class="actions"><button class="btn">⏸ Pause</button><button class="btn danger">■ Abort batch</button></span></h1>
+<div class="meta">Workflow: node-maintenance · started by Dylan at 22:41 · data is illustrative</div>
+<div class="chips"><span class="chip">Target <b>4 nodes</b></span><span class="chip">Strategy <b>rolling serial=1</b></span><span class="chip">On failure <b>pause batch</b></span><span class="chip">drain timeout <b>300s</b></span><span class="chip">Elapsed <b>18:24</b></span><span class="chip">ETA <b>23:05</b></span></div>
+<div class="steps">
+<div class="step"><div class="dot done">✓</div><div class="lbl">Preflight</div></div><div class="line done"></div>
+<div class="step"><div class="dot done">✓</div><div class="lbl">Cordon</div></div><div class="line done"></div>
+<div class="step"><div class="dot done">✓</div><div class="lbl">Drain</div></div><div class="line done"></div>
+<div class="step"><div class="dot now">4</div><div class="lbl"><b>Upgrade</b><small>kubelet</small></div></div><div class="line"></div>
+<div class="step"><div class="dot todo">5</div><div class="lbl">Health check</div></div><div class="line"></div>
+<div class="step"><div class="dot todo">6</div><div class="lbl">Uncordon</div></div>
+</div>
+<div class="sub">Currently on <b style="color:#fff">k3s-worker-03</b> (3 of 4)</div>
+<div class="grid"><div>
+<div class="card"><h3>Node queue — rolling, one node at a time; batch pauses on any node failure</h3>
+<div class="node"><div class="row1"><span class="nm">k3s-worker-01</span><span class="st ok">✓ Done · 6/6 steps</span></div><div class="bar"><i class="g" style="width:100%"></i></div><div class="row2"><span>v1.30.5 → v1.31.2</span><span>took 5:42</span></div></div>
+<div class="node"><div class="row1"><span class="nm">k3s-worker-02</span><span class="st ok">✓ Done · 6/6 steps</span></div><div class="bar"><i class="g" style="width:100%"></i></div><div class="row2"><span>v1.30.5 → v1.31.2</span><span>took 6:10</span></div></div>
+<div class="node" style="border-color:#3b82f6"><div class="row1"><span class="nm">k3s-worker-03</span><span class="st run">● Running · step 4/6 (upgrading kubelet)</span></div><div class="bar"><i class="b" style="width:62%"></i></div><div class="row2"><span>apt install kubelet=1.31.2 in progress…</span><span>elapsed 3:18</span></div></div>
+<div class="node"><div class="row1"><span class="nm">k3s-worker-04</span><span class="st wait">○ Queued</span></div><div class="bar"><i style="width:0%"></i></div><div class="row2"><span>v1.30.5 → v1.31.2</span><span>est. 6:00</span></div></div>
+</div>
+<div class="card"><h3>Live log — k3s-worker-03</h3><div class="log">
+<span class="t">TASK [cordon] mark node unschedulable</span><br>
+<span class="c">changed: [k3s-worker-03] => cordoned</span><br>
+<span class="t">TASK [drain] evict Pods (timeout 300s)</span><br>
+<span class="c">changed: [k3s-worker-03] => 11 pods evicted, 0 blocked by PDB</span><br>
+<span class="t">TASK [upgrade] apt install kubelet=1.31.2</span><br>
+<span class="w">… [k3s-worker-03] running 02:41</span>
+</div></div>
+</div><div>
+<div class="card"><h3>Preflight <span style="color:#4ade80;font-size:12px">5/6 passed</span></h3>
+<div class="check"><span class="ic g">✓</span><div>Control plane healthy<small>3/3 nodes Ready · etcd normal</small></div></div>
+<div class="check"><span class="ic g">✓</span><div>PDB blocking analysis<small>2 PDBs may delay but not block drain</small></div></div>
+<div class="check"><span class="ic a">⚠</span><div>Single-replica workloads<small>prometheus-0 · loki-0 have no replica; monitoring gaps during maintenance</small></div></div>
+<div class="check"><span class="ic g">✓</span><div>Disk space<small>4 nodes &gt; 20% free</small></div></div>
+<div class="check"><span class="ic g">✓</span><div>Version skew<small>control plane v1.31.2 ↔ target kubelet v1.31.2 (±1 allowed)</small></div></div>
+<div class="check"><span class="ic g">✓</span><div>SSH reachable<small>4/4 reachable</small></div></div>
+</div>
+<div class="card"><h3>Failure policy preview</h3><div class="pol">
+If any node fails, the batch pauses. You can:<br>
+<span class="g">↻ retry this node</span> · <span class="b">⏭ skip this node</span> · <span class="r">■ abort batch</span><br>
+Completed nodes are never re-run.
+</div></div>
+</div></div>
+</main></body></html>
