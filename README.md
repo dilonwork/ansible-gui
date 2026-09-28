@@ -2,7 +2,25 @@
 
 以 GUI 整合 Ansible 的遠端伺服器管理平台，核心場景是 **Kubernetes 叢集與 Worker Nodes 的維運**（OS patch、kubelet 升級、cordon/drain 編排）。
 
-> 目前階段：📋 規劃中（planning）— 功能規劃與設計稿已完成，尚未開始寫 code。
+> 目前階段：🚧 開發中（skeleton）— 前後端骨架已打通：可新增主機、經 SSH 跑 ping、WebSocket 看即時日誌。
+
+## 一鍵啟動
+
+```bash
+docker compose up --build
+```
+
+- 前端：http://localhost:3000
+- 後端 API：http://localhost:8000（`/docs` 有 Swagger）
+
+本機開發：
+
+```bash
+# 後端
+cd backend && pip install -r requirements.txt && uvicorn app.main:app --port 8000
+# 前端
+cd frontend && npm install && npm run dev   # http://localhost:5173，/api 與 /ws 會代理到後端
+```
 
 ## 為什麼做這個
 
@@ -37,6 +55,6 @@
 - **Phase 2 — 團隊可用**：排程、審批、RBAC、多叢集、漂移偵測、通知
 - **Phase 3 — 強化**：審計鏈、容量趨勢、AWX/Semaphore 匯入工具
 
-## 預定技術棧（待定）
+## 技術棧
 
 前端 React＋TypeScript ／ 後端 Python（FastAPI）＋官方 `ansible-runner` ／ PostgreSQL ／ Redis ／ docker-compose 一鍵部署。

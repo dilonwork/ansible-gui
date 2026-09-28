@@ -1,8 +1,16 @@
 services:
   backend:
     build: ./backend
+    expose:
+      - "8000"
     ports:
       - "8000:8000"
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
     # 之後加上：
     # - redis（Celery broker，長任務改走 Celery）
     # - postgres（取代記憶體 dict）
