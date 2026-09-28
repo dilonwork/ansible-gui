@@ -1,58 +1,58 @@
-# M6 — 即時日誌與審計
+# M6 — Live Logs & Audit
 
-> 目標：跑任務時看得到現在發生什麼事；出事後查得到誰在何時動了哪台機器，且紀錄不可竄改。
+> Goal: see what's happening while a job runs; after an incident, trace who touched which machine when — with tamper-evident records.
 
-## 6.1 即時日誌串流
+## 6.1 Live log streaming
 
-**說明**：任務執行的臨場感來源；ansible 原生輸出太雜，系統負責轉譯成可讀格式。
+**Description**: the source of a job's live feel; ansible's native output is too noisy, so the system translates it into readable form.
 
-**使用場景**：Dylan 在手機上看 worker-03 的 OS patch 進度，log 一行行推進，看到 `changed: 14 updated` 就知道快好了。
+**Scenario**: Dylan watches worker-03's OS patch progress on his phone; log lines stream by, and seeing `changed: 14 updated` tells him it's almost done.
 
-**功能細節**
-- WebSocket 推送；後端把 `ansible-runner` 的 events 轉譯成可讀行（`TASK [名稱]`／`ok`／`changed`／`failed`／`skipping`），保留原始輸出可展開看
-- 篩選：按主機篩選（只看某台的輸出）、關鍵字過濾、只看 failed/changed
-- 自動捲動開關；斷線重連後自動補齊錯過的行（以事件序號續傳）
-- 敏感字遮罩：輸出中命中 vault 變數名稱或憑證 pattern 的自動打碼（`*` 替代）
+**Details**
+- WebSocket push; the backend translates `ansible-runner` events into readable lines (`TASK [name]` / `ok` / `changed` / `failed` / `skipping`), with raw output expandable
+- Filters: by host (one machine's output only), keyword, failed/changed only
+- Auto-scroll toggle; reconnects resume missed lines automatically (by event sequence number)
+- Sensitive-word masking: output matching vault variable names or credential patterns is auto-masked (`*` substituted)
 
-**技術要點**：runner event → 後端正規化 → Redis pub/sub → WebSocket；單任務併發觀看者走同一份事件流，不重複執行。
+**Technical notes**: runner event → backend normalization → Redis pub/sub → WebSocket; concurrent viewers of one job share the same event stream — no duplicate execution.
 
-**驗收標準**：forks=5 跑 14 台，log 延遲 < 2 秒；手動 kill -9 掉瀏覽器分頁重開，歷史行完整補回。
+**Acceptance criteria**: forks=5 across 14 hosts, log latency < 2 seconds; kill -9 the browser tab and reopen — history lines fully restored.
 
-## 6.2 任務歷史
+## 6.2 Job history
 
-**說明**：每次執行的完整案卷；除錯與覆盤的入口。
+**Description**: the complete case file of every run; the entry point for debugging and post-mortems.
 
-**功能細節**
-- 列表欄位：任務名、類型（template/ad-hoc/workflow/維護）、目標範圍、狀態、耗時、執行者、開始時間；篩選：狀態、執行者、時間範圍
-- 詳情頁：完整 log（可下載）、每台主機結果（ok/changed/failed/unreachable 分群）、執行快照（playbook commit hash、參數值、EE digest、inventory 主機清單）
-- 「重跑」按鈕：用相同快照再跑一次；「只重跑失敗節點」：自動把 failed/unreachable 的主機組成新目標
-- 保留策略：預設 90 天（可設）；到期 log 壓縮歸檔（仍可下載，讀取稍慢），metadata 永留
+**Details**
+- List columns: job name, type (template/ad-hoc/workflow/maintenance), target scope, status, duration, run by, start time; filters: status, runner, time range
+- Detail page: full log (downloadable), per-host results (ok/changed/failed/unreachable groups), execution snapshot (playbook commit hash, parameter values, EE digest, inventory host list)
+- "Re-run" button: run again with the identical snapshot; "re-run failed nodes only": auto-targets the failed/unreachable hosts as a new target set
+- Retention: 90 days by default (configurable); expired logs are compressed to archive (still downloadable, slightly slower to read), metadata kept forever
 
-**驗收標準**：三個月前的任務仍能查到當時的參數快照與 commit hash；「只重跑失敗節點」不碰已成功的主機。
+**Acceptance criteria**: a three-month-old job still shows its parameter snapshot and commit hash; "re-run failed nodes only" never touches hosts that succeeded.
 
-## 6.3 hash-chained 審計鏈（P1）
+## 6.3 Hash-chained audit trail (P1)
 
-**說明**：證明「紀錄沒被改過」；將來給資安/合規看的底氣。
+**Description**: proof that "records haven't been altered" — something to show security/compliance in the future.
 
-**使用場景**：主管問「上週誰對 production worker 跑過 reboot」，Dylan 拉出審計紀錄，對方驗證 hash 鏈完整，確認無人竄改。
+**Scenario**: a manager asks "who ran reboot against production workers last week"; Dylan pulls the audit records, the other side verifies the hash chain is intact, confirming no tampering.
 
-**功能細節**
-- 每條審計紀錄包含上一條的 hash（SHA-256），形成鏈；提供驗證 API（輸入區間 → 回傳完整/斷裂位置）
-- 記錄事件：登入/登出、任務執行（含參數摘要，不含 vault 明文）、審批核准/駁回、節點操作（cordon/drain/uncordon）、憑證新增/刪除/使用、群組與變數變更、排程變更
-- 審計寫入與業務 DB 分離（獨立 table，僅追加權限）；管理員也不可刪改（應用層強制）
-- 匯出：區間匯出為簽署過的 JSONL
+**Details**
+- Each audit record includes the previous record's hash (SHA-256), forming a chain; a verification API takes a range and reports intact / break position
+- Recorded events: login/logout, job runs (parameter summaries, no vault plaintext), approval approve/reject, node operations (cordon/drain/uncordon), credential add/delete/use, group & variable changes, schedule changes
+- Audit writes are separated from the business DB (separate table, append-only); not even admins can delete or modify (enforced at the app layer)
+- Export: a range exports as signed JSONL
 
-**驗收標準**：手動改 DB 裡一條審計紀錄，驗證 API 正確指出斷裂位置；匯出的 JSONL 可用公開文件獨立驗證。
+**Acceptance criteria**: hand-edit one audit record in the DB — the verification API correctly points at the break; the exported JSONL is independently verifiable against public docs.
 
-## 6.4 日誌搜尋（P2）
+## 6.4 Log search (P2)
 
-**說明**：跨任務找線索，「上週所有 failed 的 apt upgrade 都長什麼樣」。
+**Description**: find clues across jobs — "what did all failed apt upgrades last week look like".
 
-**功能細節**
-- 全文檢索歷史 log（關鍵字＋主機＋時間範圍＋任務類型多維篩選）
-- 常用搜尋存成範本（如「找所有 dpkg 鎖定錯誤」）
-- 搜尋結果高亮命中行，前後各附 5 行上下文
+**Details**
+- Full-text search over historical logs (keyword + host + time range + job type multi-dimensional filters)
+- Saved searches as templates (e.g. "find all dpkg lock errors")
+- Hits highlighted, 5 lines of context on each side
 
 ---
 
-**本模組 Non-goals**：系統級 log 收集（Loki/ELK 那類）、主機上的應用 log 管理、SIEM 整合。
+**Non-goals of this module**: system-level log collection (Loki/ELK style), application log management on hosts, SIEM integration.

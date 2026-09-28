@@ -1,16 +1,33 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ansible_gui
+      POSTGRES_PASSWORD: ansible_gui
+      POSTGRES_DB: ansible_gui
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # no published port: only the backend talks to it
+
   backend:
     build: ./backend
+    environment:
+      DATABASE_URL: postgresql://ansible_gui:ansible_gui@postgres:5432/ansible_gui
     expose:
       - "8000"
     ports:
       - "8000:8000"
+    depends_on:
+      - postgres
+
   frontend:
     build: ./frontend
     ports:
       - "3000:80"
     depends_on:
       - backend
-    # 之後加上：
-    # - redis（Celery broker，長任務改走 Celery）
-    # - postgres（取代記憶體 dict）
+    # later:
+    # - redis (Celery broker; long jobs move off threads)
+
+volumes:
+  pgdata:

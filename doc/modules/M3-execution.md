@@ -1,107 +1,107 @@
-# M3 — 任務執行引擎
+# M3 — Job Execution Engine
 
-> 目標：把「playbook＋對象＋憑證＋參數」綁成可重複、可排程、可審批的執行單元；執行全程隔離、可觀測。
+> Goal: bind "playbook + targets + credential + parameters" into a repeatable, schedulable, approvable unit of execution; fully isolated and observable throughout.
 
 ## 3.1 Job Template
 
-**說明**：任務的基本單位，一次把執行所需的全部要素綁定，之後一鍵重跑。
+**Description**: the basic unit of a job — bind everything an execution needs once, re-run with one click after.
 
-**使用場景**：Dylan 建了一個「每週 OS 安全更新」template：綁 `os-security-update.yml`＋`patch-group`＋SSH 憑證＋forks=5；每週排程直接引用它，不用每次重填。
+**Scenario**: Dylan creates a "weekly OS security update" template: binds `os-security-update.yml` + `patch-group` + SSH credential + forks=5; the weekly schedule references it directly, no re-filling every time.
 
-**功能細節**
-- 欄位：名稱、Project＋playbook 選擇、inventory（群組多選＋可排除單台）、憑證、forks、verbose 等級、timeout
-- 參數表單（survey）：從 playbook 解析到的變數自動產生初稿（見 M2.2），可手動增刪欄位、設必填/預設值/選項清單；執行時填表單即帶入 `extra_vars`
-- 「試跑」按鈕：以 `--check` dry-run 模式先跑一遍，結果標示「試跑」不計入成功率統計
-- 執行前快照：playbook commit hash、參數值、inventory 主機清單全部凍結寫入任務紀錄（可追溯）
+**Details**
+- Fields: name, Project + playbook selection, inventory (multi-select groups + excludable single hosts), credential, forks, verbosity level, timeout
+- Parameter form (survey): draft auto-generated from variables parsed out of the playbook (see M2.2); fields can be manually added/removed, marked required, given defaults/option lists; filling the form at run time feeds `extra_vars`
+- "Dry run" button: runs once in `--check` dry-run mode first; results are labeled "dry run" and excluded from success-rate stats
+- Pre-run snapshot: playbook commit hash, parameter values, inventory host list — all frozen into the job record (traceable)
 
-**資料模型要點**：`job_templates(id, name, project_id, playbook_path, inventory_scope JSON, credential_id, forks, survey_schema JSON, require_approval, created_by)`
+**Data model notes**: `job_templates(id, name, project_id, playbook_path, inventory_scope JSON, credential_id, forks, survey_schema JSON, require_approval, created_by)`
 
-**驗收標準**：從按下「執行」到看到第一行 log < 15 秒；試跑任務不會對目標機器做任何變更。
+**Acceptance criteria**: < 15 seconds from pressing "Run" to the first log line; dry-run jobs make zero changes to target machines.
 
 ## 3.2 Ad-hoc command
 
-**說明**：不建 template 的臨時指令，回答「這批機器現在是什麼狀態」。
+**Description**: one-off commands without building a template; answers "what's the state of these machines right now".
 
-**使用場景**：懷疑某批 worker 的 kubelet 版本不一致，選 `k3s-workers` 跑 `kubelet --version`，30 秒內看到每台回傳彙總。
+**Scenario**: suspecting kubelet version skew across some workers, run `kubelet --version` against `k3s-workers` and get a per-host summary within 30 seconds.
 
-**功能細節**
-- 選主機/群組 → 選 module：常用做成表單（ping、shell/command、copy、service、package），其餘走 raw 參數輸入
-- 結果按主機彙總：ok / changed / failed 三群列表，失敗的顯示 stderr 摘要
-- 高風險 module（shell 含 rm、reboot 等關鍵字）跳出二次確認
-- Ad-hoc 執行同樣寫入任務歷史與審計（M6），不可繞過
+**Details**
+- Pick hosts/groups → pick module: common ones as forms (ping, shell/command, copy, service, package), the rest via raw parameter input
+- Results grouped by host: ok / changed / failed lists; failures show a stderr summary
+- High-risk modules (shell containing rm, reboot, etc.) pop a double confirmation
+- Ad-hoc runs are also written to job history and audit (M6) — no bypassing
 
-**驗收標準**：14 台主機的 ping 在 30 秒內全部回傳並正確分群。
+**Acceptance criteria**: ping across 14 hosts returns fully and groups correctly within 30 seconds.
 
-## 3.3 並發與批次策略
+## 3.3 Concurrency & batching strategy
 
-**說明**：控制「一次動幾台、失敗幾台就停」，是維運安全的核心開關。
+**Description**: controls "how many at once, stop after how many failures" — the core switch of operational safety.
 
-**功能細節**
-- `forks`（預設 5，可調）：同時對幾台建立 SSH 連線
-- `serial`：批次大小（數字或百分比，如 `1`、`25%`）；M5 節點維護工作流強制覆寫為 `1`
-- `max_fail_percentage`：失敗比例達門檻即中止整批（預設 0，即任一失敗就停，可放寬）
-- UI 以白話呈現：「每批 1 台／任一台失敗即停止」，不要只丟 Ansible 術語
+**Details**
+- `forks` (default 5, adjustable): how many SSH connections to open at once
+- `serial`: batch size (number or percentage, e.g. `1`, `25%`); the M5 node maintenance workflow force-overrides it to `1`
+- `max_fail_percentage`: abort the whole batch once the failure ratio hits the threshold (default 0, i.e. stop on any failure; can be relaxed)
+- The UI phrases it in plain language: "1 host per batch / stop on any failure" — don't just throw Ansible jargon at the user
 
-**驗收標準**：設 serial=1 跑 3 台，log 時間軸證明是逐台依序執行；第二台失敗時第三台未被觸及。
+**Acceptance criteria**: run 3 hosts with serial=1; the log timeline proves sequential execution; when the second host fails, the third is never touched.
 
-## 3.4 Execution Environment（容器化執行隔離）
+## 3.4 Execution Environment (containerized execution isolation)
 
-**說明**：每個任務跑在乾淨的容器裡，ansible 版本與 collections 鎖定，換機器部署結果一致。
+**Description**: every job runs in a clean container with pinned ansible and collection versions — same behavior wherever it's deployed.
 
-**使用場景**：Dylan 在 homelab 跑的 playbook，拿到另一台主機部署同樣 EE 映像，行為完全一致，不會遇到「我這邊 ansible 版本不一樣」的問題。
+**Scenario**: Dylan runs a playbook in his homelab, then deploys the same EE image on another machine: identical behavior, never a "but the ansible version differs on my box" moment.
 
-**功能細節**
-- 系統預設 EE 映像：ansible-core＋kubernetes collection＋常用 collections，版本號固定
-- 自訂 EE：UI 勾選 collections 清單 → 自動產生定義檔 → 建置映像 → 推送到內建 registry
-- Job Template 可指定 EE 版本；任務歷史記錄實際使用的 EE digest
-- 任務容器資源限制（CPU/記憶體）可設，避免大 forks 吃光主機
+**Details**
+- System default EE image: ansible-core + kubernetes collection + common collections, pinned versions
+- Custom EE: tick collection checkboxes in the UI → definition file auto-generated → image built → pushed to the built-in registry
+- Job Templates can pin an EE version; job history records the actual EE digest used
+- Per-job container resource limits (CPU/memory) configurable, so big forks can't eat the host
 
-**技術要點**：執行層用官方 `ansible-runner` 函式庫在容器內驅動；事件流經 WebSocket 轉發（見 M6.1）。
+**Technical notes**: the execution layer drives the official `ansible-runner` library inside the container; the event stream is forwarded over WebSocket (see M6.1).
 
-**驗收標準**：同一 template 用 EE v1.2.0 跑兩次，collections 版本完全相同；自訂 EE 建置失敗時有明確的建置 log。
+**Acceptance criteria**: run the same template twice with EE v1.2.0 — collection versions identical both times; a failed custom EE build shows a clear build log.
 
-## 3.5 排程（P1）
+## 3.5 Scheduling (P1)
 
-**說明**：例行維運任務的時間觸發器，如每週日凌晨的 OS patch。
+**Description**: time triggers for routine ops work, e.g. Sunday-midnight OS patches.
 
-**使用場景**：「每週 OS 安全更新」排程：每週日 02:00 對 `patch-group` 跑 template，跑完推 LINE 通知結果。
+**Scenario**: a "weekly OS security update" schedule: runs the template against `patch-group` every Sunday 02:00, pushes a LINE notification with the result.
 
-**功能細節**
-- cron 表達式＋圖形化產生器（分/時/週/月點選），時區可設（預設 America/Phoenix）
-- 排程綁定 Job Template；執行時永遠用「最新」template 定義，但每次執行的實際參數寫入歷史
-- 漏跑不補跑：服務停機期間錯過的排程只發通知、不自動補執行（維運任務補跑有風險，刻意設計）
-- 排程可暫停/恢復；下次執行時間明確顯示
+**Details**
+- Cron expression + graphical builder (click minute/hour/weekday/month), timezone configurable (default America/Phoenix)
+- Schedules bind Job Templates; each run always uses the "latest" template definition, but the actual parameters of every run are written to history
+- Missed runs are not made up: schedules missed during downtime only trigger a notification, never an automatic catch-up run (catching up on ops tasks is risky — deliberate design)
+- Schedules can be paused/resumed; next run time always visible
 
-**驗收標準**：設一個 2 分鐘後的一次性排程，準時觸發；服務重啟模擬漏跑，只收到通知、沒有補執行。
+**Acceptance criteria**: set a one-off schedule 2 minutes out — it fires on time; simulate a missed run via service restart — notification only, no catch-up run.
 
-## 3.6 審批流程（P1）
+## 3.6 Approval flow (P1)
 
-**說明**：高風險任務執行前多一道人眼確認。
+**Description**: one more pair of human eyes before high-risk jobs run.
 
-**使用場景**：`kubelet-upgrade` template 標記需審批；Dylan 在外用手機收到 LINE 審批請求，點連結看參數摘要後核准，任務才開始跑。
+**Scenario**: the `kubelet-upgrade` template is marked as requiring approval; Dylan gets a LINE approval request on his phone while out, taps the link to review the parameter summary, approves, and the job starts.
 
-**功能細節**
-- Template 層級開關「需審批」；觸發後產生申請單（申請人、template、參數摘要、目標主機數、預估影響）
-- 審批人由 RBAC `approver` 角色擔任；可核准/駁回（駁回必填理由）；申請人不可審批自己的單
-- 審批請求經 M8 推播（LINE/Email）；申請單逾時（預設 4 小時，可設）自動失效
-- 審批紀錄寫入審計鏈（M6.3），含核准人與時間戳
+**Details**
+- Per-template "requires approval" switch; triggering creates a request ticket (requester, template, parameter summary, target host count, estimated impact)
+- Approvers come from the RBAC `approver` role; can approve/reject (rejection requires a reason); requesters can't approve their own tickets
+- Approval requests go out via M8 (LINE/Email); tickets expire automatically after a timeout (default 4 hours, configurable)
+- Approval records enter the audit chain (M6.3) with approver and timestamp
 
-**驗收標準**：需審批的 template 按下執行後，任務狀態為「待審批」且無任何 SSH 連線產生；逾時後狀態變「已失效」。
+**Acceptance criteria**: pressing run on an approval-required template leaves the job "pending approval" with zero SSH connections made; after timeout the status becomes "expired".
 
-## 3.7 Workflow（P1）
+## 3.7 Workflow (P1)
 
-**說明**：把多個 Job Template 串成有分支的工作流；M5 一鍵節點維護就是內建 workflow。
+**Description**: chain multiple Job Templates into a branching workflow; the M5 one-click node maintenance is a built-in workflow.
 
-**使用場景**：「上線新節點」workflow：node-init → 加入叢集 → 驗證，每步成功才往下走，任一步失敗走告警分支發通知。
+**Scenario**: an "onboard new node" workflow: node-init → join cluster → verify; each step proceeds only on success, any failure takes the alert branch and sends a notification.
 
-**功能細節**
-- 視覺化編排：節點＝Job Template，邊＝成功/失敗分支；支援平行分支（fork/join）
-- 每個節點可覆寫參數（用上游節點輸出當變數，基本字串模板）
-- Workflow 執行有總覽時間軸，每個子任務狀態獨立可見；整體狀態＝最嚴重的子任務狀態
-- 內建 workflow：節點維護（M5）、新節點上線；使用者可複製修改
+**Details**
+- Visual orchestration: nodes = Job Templates, edges = success/failure branches; parallel branches (fork/join) supported
+- Each node can override parameters (upstream node outputs as variables, basic string templating)
+- Workflow runs get an overview timeline; each sub-job's status independently visible; overall status = the most severe sub-job status
+- Built-in workflows: node maintenance (M5), new node onboarding; users can clone and modify
 
-**驗收標準**：三節點 workflow 中間失敗，失敗分支被觸發且後續成功分支未執行；總覽頁能一眼看出卡在哪一步。
+**Acceptance criteria**: in a three-node workflow the middle node fails → the failure branch fires and later success branches never run; the overview page makes it obvious where it's stuck.
 
 ---
 
-**本模組 Non-goals**：CI/CD pipeline（測試/建置/部署軟體）、跨系統的通用 workflow 引擎（如 n8n 那類）。
+**Non-goals of this module**: CI/CD pipelines (testing/building/deploying software), generic cross-system workflow engines (like n8n).

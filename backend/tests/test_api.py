@@ -1,35 +1,43 @@
 """Backend API tests.
 
+DATABASE_URL points at a temp SQLite file (set before the app is imported),
+so tests run against a real database without needing PostgreSQL.
 No real sshd / ansible needed:
 - keyscan is monkeypatched (real probing is covered by scripts/e2e_smoke.sh)
 - run_playbook is replaced with a fake emitter (tests the API + WS plumbing)
 """
+import os
+import tempfile
 import time
 import types
+
+_tmp = tempfile.mkdtemp(prefix="ansible-gui-test-")
+os.environ["DATABASE_URL"] = f"sqlite:///{_tmp}/test.db"
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app import main
 from app import runner_service
+from app.db import init_db, session_scope
 from app.main import app
+from app.models import Host, Job, Playbook, Template
 
 
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.setattr(main, "keyscan", lambda address, port: "fake-host-key-line")
-    main.hosts.clear()
-    main.playbooks.clear()
-    main.templates.clear()
-    main.jobs.clear()
-    main.ws_queues.clear()
+    init_db()  # tables must exist before the first clear (lifespan runs later)
+    _clear_db()
     with TestClient(app) as c:
         yield c
-    main.hosts.clear()
-    main.playbooks.clear()
-    main.templates.clear()
-    main.jobs.clear()
-    main.ws_queues.clear()
+    _clear_db()
+
+
+def _clear_db():
+    with session_scope() as s:
+        for m in (Job, Template, Playbook, Host):
+            s.query(m).delete()
 
 
 def _add_host(client, name="h1"):
@@ -88,6 +96,13 @@ def test_list_hosts_does_not_leak_private_key(client):
     _add_host(client)
     hosts = client.get("/api/hosts").json()
     assert "private_key" not in hosts[0]
+
+
+def test_data_survives_across_api_calls(client):
+    # regression test for the old in-memory dicts: data must persist
+    hid = _add_host(client, name="persist")
+    with session_scope() as s:
+        assert s.get(Host, hid).name == "persist"
 
 
 def test_add_host_keyscan_fail_returns_400(client, monkeypatch):
@@ -198,9 +213,10 @@ def test_job_from_template_freezes_snapshot(client, monkeypatch):
     tid = _add_template(client, pid, [hid], extra_vars={"a": 1}, check_mode=True)
     jid = client.post("/api/jobs", json={"template_id": tid}).json()["job_id"]
 
-    # mutate the template after launch: the running job must be unaffected
-    main.templates[tid]["extra_vars"] = {"a": 999}
-    main.playbooks[pid]["content"] = "- name: v2 changed\n"
+    # mutate the template and playbook after launch: the running job must be unaffected
+    with session_scope() as s:
+        s.get(Template, tid).extra_vars = {"a": 999}
+        s.get(Playbook, pid).content = "- name: v2 changed\n"
 
     job = _wait_done(client, jid)
     assert job["status"] == "successful"

@@ -1,6 +1,6 @@
 FROM python:3.12-slim
 
-# ansible 走 SSH 需要 ssh client；keyscan 需要 openssh-client
+# ansible needs an ssh client; keyscan needs openssh-client
 RUN apt-get update && apt-get install -y --no-install-recommends openssh-client \
     && rm -rf /var/lib/apt/lists/*
 

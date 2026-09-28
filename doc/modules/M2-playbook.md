@@ -1,71 +1,71 @@
-# M2 — Playbook 管理
+# M2 — Playbook Management
 
-> 目標：Git 是唯一的 playbook 來源；UI 只做「同步、瀏覽、檢查、發佈」，不做線上編輯器（編輯回 Git，這是刻意設計）。
+> Goal: Git is the only source of playbooks; the UI only does "sync, browse, check, publish" — no online editor (edit in Git; deliberate design).
 
-## 2.1 Git Project 同步
+## 2.1 Git Project sync
 
-**說明**：對應 AWX 的 Project 概念，一個 Project 就是一個 git repo。
+**Description**: maps to AWX's Project concept — one Project is one git repo.
 
-**使用場景**：Dylan 把維運 playbook 推到 GitHub，系統自動同步，新的 `os-security-update.yml` 出現在 Playbook 列表可直接建 Job Template。
+**Scenario**: Dylan pushes his ops playbooks to GitHub; the system syncs automatically, and the new `os-security-update.yml` shows up in the Playbook list ready to build a Job Template.
 
-**功能細節**
-- 欄位：名稱、git URL、分支/tag（預設 main）、憑證（private repo 用 deploy key，存 M7）、同步排程（預設每次執行前檢查＋定時）
-- 同步時列出 repo 內的 playbook 檔案（`*.yml` 且含 `hosts:` 的啟發式判斷＋手動標記）
-- repo 有新 commit 可選自動同步或只發通知；同步失敗（認證/網路）要明確報錯
-- 每個 Project 記錄目前同步到的 commit hash，任務歷史關聯它（可追溯「這次執行用的是哪版 playbook」）
+**Details**
+- Fields: name, git URL, branch/tag (default main), credential (deploy key for private repos, stored in M7), sync schedule (default: check before every run + periodic)
+- On sync, list playbook files in the repo (heuristic: `*.yml` containing `hosts:` + manual marking)
+- New commits in the repo: opt into auto-sync or notify-only; sync failures (auth/network) must report clearly
+- Each Project records the commit hash it has synced to; job history links to it (traceable: "which version of the playbook did this run use")
 
-**驗收標準**：push 新 playbook 後 1 分鐘內出現在 UI；任務歷史能查到執行時的 commit hash。
+**Acceptance criteria**: a pushed playbook appears in the UI within 1 minute; job history shows the commit hash at run time.
 
-## 2.2 Playbook 瀏覽與語法檢查
+## 2.2 Playbook browsing & syntax check
 
-**說明**：執行前先看、先檢查，減少低級失敗。
+**Description**: look before you run, check before you run — fewer rookie failures.
 
-**功能細節**
-- 樹狀瀏覽 repo 檔案；點 playbook 看 YAML（唯讀＋語法高亮）
-- 「語法檢查」按鈕跑 `ansible-playbook --syntax-check`，錯誤標出行號與訊息
-- 靜態解析摘要：hosts、tasks 數量、引用的 roles、有無 `become: yes`（高風險標示）
-- 建 Job Template 時自動帶入解析到的變數作為參數表單初稿（M3.1）
+**Details**
+- Tree-browse repo files; click a playbook to view YAML (read-only + syntax highlighting)
+- "Syntax check" button runs `ansible-playbook --syntax-check`; errors show line numbers and messages
+- Static analysis summary: hosts, task count, referenced roles, whether `become: yes` is present (flagged high-risk)
+- When building a Job Template, parsed variables are auto-filled as the parameter form draft (M3.1)
 
-**驗收標準**：一個縮排錯誤的 playbook，檢查後 5 秒內指出行號。
+**Acceptance criteria**: a playbook with an indentation error gets its line number pointed out within 5 seconds of checking.
 
-## 2.3 Galaxy roles / collections 管理
+## 2.3 Galaxy roles / collections management
 
-**說明**：playbook 的依賴也要版本化，否則換環境就跑不起來。
+**Description**: playbook dependencies must be versioned too, or nothing runs when you switch environments.
 
-**功能細節**
-- 每個 Project 可附 `requirements.yml`，UI 可編輯（這是少數允許線上改的，因為它單純）
-- 安裝/更新按鈕，版本鎖定；安裝結果寫入執行環境建置（關聯 M3.4）
-- 顯示已安裝 collections 清單與版本（ansible-galaxy collection list）
+**Details**
+- Each Project may include a `requirements.yml`, editable in the UI (one of the few things allowed to be edited online, because it's trivial)
+- Install/update buttons, versions pinned; install results feed into execution environment builds (linked to M3.4)
+- Show installed collections and versions (ansible-galaxy collection list)
 
-## 2.4 變數與 Vault
+## 2.4 Variables & Vault
 
-**說明**：三層變數＋加密變數，UI 永不洩漏明文。
+**Description**: three variable layers + encrypted variables; the UI never leaks plaintext.
 
-**功能細節**
-- 變數層級：Project 預設 → 群組 → 主機（與 M1.2 的 effective vars 預覽打通）
-- 兩種編輯模式：表單（key/value）與 YAML 原始模式
-- Vault：vault 密碼存在 M7 憑證；加密值在 UI 顯示為 `!vault（已加密）`，任何列表/日誌都不出現明文
-- 「新增加密變數」流程：在 UI 輸入明文 → 後端加密 → 只存密文（明文不落地、不進 log）
+**Details**
+- Variable layers: Project defaults → group → host (wired into the M1.2 effective vars preview)
+- Two edit modes: form (key/value) and raw YAML
+- Vault: vault password stored as an M7 credential; encrypted values display as `!vault (encrypted)` in the UI; no plaintext in any list/log
+- "Add encrypted variable" flow: type plaintext in the UI → backend encrypts → only ciphertext is stored (plaintext never lands on disk, never enters logs)
 
-**驗收標準**：用關鍵字搜尋整個 UI（含日誌），找不到任何 vault 明文。
+**Acceptance criteria**: searching the entire UI (including logs) by keyword finds no vault plaintext.
 
-## 2.5 內建官方模板
+## 2.5 Built-in official templates
 
-**說明**：開箱即用的最佳實踐，降低第一次使用的門檻，也是 M5 工作流的預設 playbook。
+**Description**: out-of-the-box best practices that lower the first-use barrier; also the default playbooks for M5 workflows.
 
-**功能細節**
-- 隨系統附帶：`os-security-update`、`kubelet-upgrade`、`rolling-reboot`、`node-init`（新節點初始化：建使用者、裝 containerd、關 swap 等）
-- 每個模板附參數說明文件與合理預設值；使用者「複製為我的」後可修改，官方模板本身唯讀
-- 模板版本跟著系統更新，更新時提示 diff
+**Details**
+- Shipped with the system: `os-security-update`, `kubelet-upgrade`, `rolling-reboot`, `node-init` (new node init: create user, install containerd, disable swap, etc.)
+- Each template ships parameter docs and sane defaults; users "Copy as mine" to modify; official templates themselves are read-only
+- Template versions follow system updates; diffs are shown on update
 
-## 2.6 版本 diff（P1）
+## 2.6 Version diff (P1)
 
-**說明**：回答「這次執行跟上次差在哪」。
+**Description**: answers "what changed between this run and the last one".
 
-**功能細節**
-- 同一 playbook 兩個 commit 的 diff 檢視（沿用 git diff）
-- 任務歷史頁直接顯示「本次執行 vs 上次成功執行」的 playbook diff 連結
+**Details**
+- Diff view of two commits of the same playbook (built on git diff)
+- The job history page links directly to a "this run vs last successful run" playbook diff
 
 ---
 
-**本模組 Non-goals**：線上 YAML 編輯器、playbook 市集/分享平台。
+**Non-goals of this module**: online YAML editor, playbook marketplace/sharing platform.

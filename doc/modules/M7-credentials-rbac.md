@@ -1,58 +1,58 @@
-# M7 — 憑證與 RBAC
+# M7 — Credentials & RBAC
 
-> 目標：secret 的集中保險箱＋最小權限的人員控管；原則是「UI 永遠不吐明文，權限預設最小」。
+> Goal: a central vault for secrets + least-privilege people management; the principle is "the UI never emits plaintext, permissions default to minimal".
 
-## 7.1 憑證管理
+## 7.1 Credential management
 
-**說明**：所有 secret 的唯一存放處；Ansible 執行時才注入，任何時刻都不經 UI 明文傳輸。
+**Description**: the single home for all secrets; injected only at Ansible run time, never transmitted in plaintext through the UI.
 
-**使用場景**：Dylan 新增 homelab 的 SSH 私鑰，貼上後系統只存加密版；之後建 Job Template 下拉選這把 key，執行時自動注入，Dylan 自己也看不到明文。
+**Scenario**: Dylan adds his homelab SSH private key; after pasting, the system stores only the encrypted form; later he picks that key from a dropdown when building a Job Template, it's injected at run time, and even Dylan himself can't see the plaintext.
 
-**功能細節**
-- 類型：SSH 私鑰、帳號密碼、Ansible Vault 密碼、kubeconfig、（P1）雲端 AK/SK
-- 落盤加密：AES-256-GCM，加密 key 來自環境變數（初期）→ 之後支援 KMS；DB 被拖走也解不開
-- UI 只顯示：名稱、類型、指紋（SSH key）、遮罩（`ghp_****abcd` 取末 4 碼）、建立/更新時間與更新人；**任何 API 都不回傳明文**（編輯＝重新上傳覆蓋）
-- 綁定範圍：全域 / 指定群組 / 指定主機；執行時解析順序：主機 → 群組 → 全域
-- 使用紀錄：每次被任務引用記一筆（誰、何時、哪個任務），異常使用（如半夜被呼叫）可告警（經 M8，P1）
+**Details**
+- Types: SSH private key, username/password, Ansible Vault password, kubeconfig, (P1) cloud AK/SK
+- Encryption at rest: AES-256-GCM, encryption key from an environment variable (initially) → KMS support later; useless even if the DB is exfiltrated
+- The UI only shows: name, type, fingerprint (SSH keys), masked form (`ghp_****abcd`, last 4 chars), created/updated time and by whom; **no API ever returns plaintext** (editing = re-upload to overwrite)
+- Binding scope: global / specific groups / specific hosts; resolution order at run time: host → group → global
+- Usage records: every reference by a job is logged (who, when, which job); anomalous use (e.g. called at 3am) can alert (via M8, P1)
 
-**驗收標準**：用瀏覽器開發者工具檢查所有 API 回應，找不到任何私鑰/密碼明文；刪除被 template 引用的憑證時被阻擋並列出引用者。
+**Acceptance criteria**: inspecting all API responses in browser dev tools finds no private key/password plaintext; deleting a credential referenced by a template is blocked with the referrers listed.
 
-## 7.2 RBAC（P1）
+## 7.2 RBAC (P1)
 
-**說明**：多人使用時，誰能動什麼要能切分；初期單人用可關閉（預設 admin）。
+**Description**: with multiple users, who can touch what must be separable; can be disabled for single-user (default admin).
 
-**使用場景**：團隊加入一位 junior SRE，給他 `operator` 角色：能跑既定的 patch template、不能改 template 定義、不能碰憑證、不能審批。
+**Scenario**: a junior SRE joins the team with the `operator` role: can run the established patch templates, can't change template definitions, can't touch credentials, can't approve.
 
-**功能細節**
-- 模型：使用者 → 角色 → 權限（資源 × 動作）；資源：主機群組、Job Template、叢集、憑證、系統設定
-- 內建角色：
-  - `admin`：全部
-  - `operator`：執行 template/ad-hoc、看日誌；不可新增/修改 template、憑證、排程
-  - `viewer`：唯讀（UI 自動隱藏所有操作按鈕，不只是後端擋）
-  - `approver`：審批（M3.6）＋唯讀其他
-- 自訂角色：勾選矩陣產生；支援 LDAP/OIDC 對接（P2，帳號來源外包）
-- 權限變更即時生效（不用重新登入）；所有授權變更寫審計（M6.3）
+**Details**
+- Model: user → role → permissions (resource × action); resources: host groups, Job Templates, clusters, credentials, system settings
+- Built-in roles:
+  - `admin`: everything
+  - `operator`: run templates/ad-hoc, view logs; cannot add/modify templates, credentials, schedules
+  - `viewer`: read-only (the UI hides all action buttons outright, not just backend blocking)
+  - `approver`: approvals (M3.6) + read-only otherwise
+- Custom roles: generated from a checkbox matrix; LDAP/OIDC integration (P2, identity outsourced)
+- Permission changes take effect immediately (no re-login); all grant changes enter the audit log (M6.3)
 
-**驗收標準**：viewer 登入後畫面上找不到任何「執行/新增/刪除」按鈕；operator 嘗試呼叫新增 template 的 API 被 403。
+**Acceptance criteria**: after a viewer logs in, no "run/add/delete" button exists anywhere on screen; an operator calling the add-template API gets a 403.
 
-## 7.3 雲端憑證（P1）
+## 7.3 Cloud credentials (P1)
 
-**說明**：為動態 inventory（M1.5）與未來雲資源操作準備的憑證類型。
+**Description**: credential types ready for dynamic inventory (M1.5) and future cloud resource operations.
 
-**功能細節**
-- 支援 AWS AK/SK、Azure Service Principal、GCP Service Account（JSON）
-- 每組雲端憑證標註用途（inventory 同步專用 / 通用），inventory 同步任務只能選「inventory 專用」的（最小權限）
-- 雲端憑證不進入 Ansible 執行環境，只給後端的同步 worker 用（隔離）
+**Details**
+- Supports AWS AK/SK, Azure Service Principal, GCP Service Account (JSON)
+- Each cloud credential is labeled by purpose (inventory-sync-only / general); inventory sync jobs can only pick "inventory-only" ones (least privilege)
+- Cloud credentials never enter the Ansible execution environment — only the backend sync workers use them (isolated)
 
-## 7.4 輪換提醒（P2）
+## 7.4 Rotation reminders (P2)
 
-**說明**：secret 放久會爛；系統負責提醒，不負責自動輪換（自動輪換風險太高，刻意不做）。
+**Description**: secrets go stale; the system reminds, but never auto-rotates (auto-rotation is too risky — deliberately not built).
 
-**功能細節**
-- 每個憑證可設有效期；到期前 30/7/1 天發提醒（經 M8）
-- SSH key 指紋盤點：定期比對各主機 `authorized_keys` 與系統內登記的 key，發現「系統外」的 key 告警（可能是手動加的後門，也可能是合法的，都要讓人知道）
-- kubeconfig 憑證到期預檢（與 M4.1 連動）
+**Details**
+- Each credential can carry an expiry; reminders at 30/7/1 days before (via M8)
+- SSH key fingerprint audit: periodically compare each host's `authorized_keys` against registered keys; "foreign" keys raise an alert (could be a manually added backdoor, could be legitimate — either way, people should know)
+- kubeconfig expiry pre-check (linked with M4.1)
 
 ---
 
-**本模組 Non-goals**：自動 secret 輪換、企業級 PAM 對接（CyberArk 等）、憑證的跨系統同步。
+**Non-goals of this module**: automatic secret rotation, enterprise PAM integration (CyberArk etc.), cross-system credential sync.

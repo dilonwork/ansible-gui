@@ -29,6 +29,18 @@ python -m pytest tests/ -q
 L1 API tests (no sshd needed, CI-safe). Full test strategy: `doc/testing.md`.
 E2E smoke (needs a local sshd): `./scripts/e2e_smoke.sh` from the repo root.
 
+## Database
+
+SQLAlchemy. `DATABASE_URL` selects the backend:
+
+- `postgresql://ansible_gui:ansible_gui@postgres:5432/ansible_gui` (docker compose)
+- `sqlite:///./ansible_gui.db` (local dev default when the env var is unset)
+- tests point it at a temp SQLite file
+
+Tables are created at startup (`create_all`); migrations come later with the
+production hardening step. Event history is stored per job in a JSON column so
+late WebSocket joiners get the full replay from the database.
+
 ## API
 
 - `POST /api/hosts` {name, address, port, username, private_key} → add host (runs ssh-keyscan probe)
@@ -51,7 +63,7 @@ E2E smoke (needs a local sshd): `./scripts/e2e_smoke.sh` from the repo root.
 
 ## To be replaced (skeleton simplifications)
 
-- in-memory dicts → PostgreSQL
+- ~~in-memory dicts → PostgreSQL~~ **done**: SQLAlchemy; PostgreSQL in compose, SQLite file for local dev
 - threading → Celery + Redis (long jobs, retry, cancel)
 - no auth → login + RBAC
-- private key in memory → Vault-encrypted at rest
+- private key in DB cleartext → Vault-encrypted at rest (M7)

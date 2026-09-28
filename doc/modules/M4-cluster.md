@@ -1,80 +1,80 @@
-# M4 — Kubernetes 叢集管理
+# M4 — Kubernetes Cluster Management
 
-> 目標：多叢集的唯讀可觀測＋受控的節點操作（cordon/drain/uncordon）；工作負載只看不改，改機器的事交給 Ansible。
+> Goal: read-only observability across clusters + controlled node operations (cordon/drain/uncordon); workloads are look-but-don't-touch — changing machines is Ansible's job.
 
-## 4.1 叢集接入
+## 4.1 Cluster onboarding
 
-**說明**：把 kubeconfig 交給系統，後續所有 K8s 視角都從這裡來。
+**Description**: hand the system a kubeconfig; every K8s view afterwards comes from here.
 
-**使用場景**：Dylan 貼上 homelab k3s 的 kubeconfig，系統驗證連通後，叢集出現在頂欄切換器，節點開始同步進 inventory（M1.4）。
+**Scenario**: Dylan pastes his homelab k3s kubeconfig; after the connectivity check passes, the cluster appears in the top-bar switcher and nodes start syncing into inventory (M1.4).
 
-**功能細節**
-- 匯入方式：貼上 YAML / 上傳檔案；解析後顯示叢集名稱、server 位址、憑證到期日預檢
-- 連通性檢測：實際打一次 API（列出 nodes），失敗分類報錯（憑證過期 / 網路不通 / RBAC 權限不足）
-- kubeconfig 以憑證形式存 M7（加密落盤，UI 不回傳明文）；支援多叢集並存，各自獨立憑證
-- 憑證即將過期（30 天內）發提醒（經 M8）
+**Details**
+- Import via pasted YAML / file upload; after parsing show cluster name, server address, certificate expiry pre-check
+- Connectivity check: actually hit the API once (list nodes); failures are categorized (certificate expired / network unreachable / insufficient RBAC)
+- kubeconfig stored as an M7 credential (encrypted at rest, never returned in plaintext by the UI); multiple clusters coexist, each with its own credential
+- Expiring certificates (within 30 days) trigger reminders (via M8)
 
-**驗收標準**：貼上過期憑證的 kubeconfig，明確提示「憑證已過期」而非泛用連線錯誤；刪除叢集後其同步產生的 inventory 標示一併清理。
+**Acceptance criteria**: pasting a kubeconfig with an expired certificate yields an explicit "certificate expired" message, not a generic connection error; deleting a cluster also cleans up the inventory marks its sync created.
 
-## 4.2 叢集總覽
+## 4.2 Cluster overview
 
-**說明**：一屏回答「這個叢集現在健康嗎」。
+**Description**: one screen answering "is this cluster healthy right now".
 
-**功能細節**
-- 卡片欄位：K8s 版本、節點 Ready x/y、異常 Pod 數（CrashLoopBackOff、Pending、ImagePullBackOff 分類計數）、API 延遲
-- 異常 Pod 按 namespace 分組取 top 5，點入跳 4.5 工作負載視圖（P1 前先給 kubectl 指令提示）
-- 更新頻率 30 秒；P0 用 polling，P1 切 watch＋WebSocket 推送
-- 多叢集時可並排對比（儀表板設計稿的雙卡片即此規格）
+**Details**
+- Card fields: K8s version, nodes Ready x/y, abnormal Pod count (CrashLoopBackOff, Pending, ImagePullBackOff counted separately), API latency
+- Abnormal Pods grouped by namespace, top 5; clicking jumps to the 4.5 workload view (before P1, show a kubectl command hint instead)
+- 30-second refresh; P0 uses polling, P1 switches to watch + WebSocket push
+- Multiple clusters can be compared side by side (the dual cards in the dashboard mockup are this spec)
 
-**驗收標準**：手動 cordon 一台 node，30 秒內總覽 Ready 數正確變化；API 斷線時卡片顯示「資料過期」而非靜默展示舊數字。
+**Acceptance criteria**: manually cordon a node — the overview Ready count updates correctly within 30 seconds; when the API is unreachable the card shows "data stale" instead of silently showing old numbers.
 
-## 4.3 節點列表
+## 4.3 Node list
 
-**說明**：Worker 節點的作戰地圖；儀表板第一屏的核心表格即此規格的精簡版。
+**Description**: the battle map for worker nodes; the dashboard's first-screen core table is the slim version of this spec.
 
-**使用場景**：升級前 Dylan 篩出「版本低於 v1.31.2 的 worker」，全選加入維護佇列（M5.6）。
+**Scenario**: before an upgrade, Dylan filters "workers below v1.31.2" and bulk-adds them to the maintenance queue (M5.6).
 
-**功能細節**
-- 欄位：主機名、角色（control-plane/worker，來自 label）、K8s 版本、kubelet 版本、containerd/CRI 版本、Ready 狀態、CPU/記憶體使用率、OS 映像、運行時間
-- 篩選：角色、狀態（Ready/NotReady/漂移）、版本、群組；關鍵字搜尋主機名
-- 點主機名 → 節點詳情抽屜：完整 labels/taints、conditions 時間線、已分配資源（allocatable vs requests）、最近 Events、SSH 連線資訊快捷入口
-- 版本漂移 badge：實際版本低於群組期望版本（M5.4）時琥珀色標示，該列操作按鈕變「升級」
+**Details**
+- Columns: hostname, role (control-plane/worker, from labels), K8s version, kubelet version, containerd/CRI version, Ready status, CPU/memory usage, OS image, uptime
+- Filters: role, status (Ready/NotReady/drifted), version, group; keyword search on hostname
+- Click a hostname → node detail drawer: full labels/taints, conditions timeline, allocated resources (allocatable vs requests), recent Events, quick SSH connection entry
+- Version drift badge: amber when the actual version is below the group expected version (M5.4); that row's action button becomes "Upgrade"
 
-**驗收標準**：14 節點列表載入 < 2 秒；篩選條件可存成常用視圖（如「待升級 worker」）。
+**Acceptance criteria**: 14-node list loads in < 2 seconds; filters can be saved as named views (e.g. "workers pending upgrade").
 
 ## 4.4 cordon / drain / uncordon
 
-**說明**：節點維護的標準前置動作，做成受控操作而非裸 kubectl。
+**Description**: the standard preamble to node maintenance, as a controlled operation rather than bare kubectl.
 
-**使用場景**：rke2-worker-04 要換硬碟，Dylan 在節點列表點「drain」，系統先警告有 2 個 Pod 受 PDB 保護會卡住，確認後執行並即時顯示驅逐進度。
+**Scenario**: rke2-worker-04 needs a disk swap; Dylan clicks "drain" on the node list; the system first warns that 2 Pods are protected by PDB and would block, then executes after confirmation with live eviction progress.
 
-**功能細節**
-- drain 前預檢並顯示：將被驅逐的 Pod 數、是否會被 PDB 阻擋（列出阻擋的 PDB）、DaemonSet 會被忽略的提示
-- 參數：`--ignore-daemonsets`、`--delete-emptydir-data` 預設開啟並明確標示；grace period 可調；timeout 預設 300 秒
-- 高風險操作走審批（M3.6，若 template/操作被標記）；所有操作寫入審計（M6.3）
-- drain 進度即時顯示（已驅逐 x/y Pod），卡住時可取消；uncordon 一鍵恢復調度
+**Details**
+- Pre-drain checks displayed up front: Pod count to be evicted, whether any PDB would block (listing the blocking PDBs), a note that DaemonSets will be ignored
+- Parameters: `--ignore-daemonsets` and `--delete-emptydir-data` on by default and clearly labeled; grace period adjustable; timeout default 300 seconds
+- High-risk operations go through approval (M3.6, if the template/operation is flagged); every operation enters the audit log (M6.3)
+- Live drain progress (x/y Pods evicted); can be canceled when stuck; one-click uncordon restores scheduling
 
-**驗收標準**：drain 一台有 PDB 保護的測試節點，預檢正確警告且執行時尊重 PDB（不強殺）；操作全程可在審計查到「誰、何時、對哪台」。
+**Acceptance criteria**: draining a test node protected by PDB warns correctly in pre-check and respects the PDB during execution (no force-kill); the whole operation is auditable as "who, when, against which machine".
 
-## 4.5 工作負載唯讀視圖（P1）
+## 4.5 Read-only workload view (P1)
 
-**說明**：出問題時快速定位「哪個 workload 在鬧」，但不提供修改（修改走 GitOps/CI，那是別的工具的事）。
+**Description**: quickly locate "which workload is misbehaving" when things break — but no editing (edits go through GitOps/CI; that's another tool's job).
 
-**功能細節**
-- 列表：Deployment / StatefulSet / DaemonSet / Pod，欄位含狀態、就緒副本 x/y、重啟次數（重啟次數高亮排序，方便抓 CrashLoop）
-- 點 Pod 看最近 200 行 logs、多容器可切換；點 Deployment 看 events
-- namespace 篩選＋關鍵字搜尋；預設隱藏 kube-system（可展開）以降低噪音
+**Details**
+- Lists: Deployment / StatefulSet / DaemonSet / Pod, with status, ready replicas x/y, restart counts (restart counts highlighted and sortable, handy for catching CrashLoops)
+- Click a Pod for its last 200 log lines, switchable across containers; click a Deployment for its events
+- Namespace filter + keyword search; kube-system hidden by default (expandable) to cut noise
 
-**驗收標準**：一個 CrashLoopBackOff 的 Pod，能在 3 次點擊內看到它的 log。
+**Acceptance criteria**: a CrashLoopBackOff Pod's logs are reachable within 3 clicks.
 
-## 4.6 節點事件時間線（P2）
+## 4.6 Node event timeline (P2)
 
-**說明**：把散在各處的 Events 按節點聚合，方便回溯「這台機器昨天發生什麼事」。
+**Description**: aggregate scattered Events per node, for answering "what happened on this machine yesterday".
 
-**功能細節**
-- 按節點聚合近 7 天 Events：驅逐、OOMKilled、磁碟壓力、kubelet 重啟等，依嚴重度著色
-- 與 M6 任務歷史交叉引用：同一時間段在該節點跑過的任務自動標註在時間線上（「這次 NotReady 前 10 分鐘跑過 OS patch」）
+**Details**
+- Per-node aggregation of the last 7 days of Events: evictions, OOMKilled, disk pressure, kubelet restarts, etc., colored by severity
+- Cross-referenced with M6 job history: jobs that ran on the node in the same window are auto-annotated on the timeline ("OS patch ran 10 minutes before this NotReady")
 
 ---
 
-**本模組 Non-goals**：工作負載的建立/修改/刪除、Helm 管理、GitOps、叢集建立（kubeadm/k3s 安裝向導）。
+**Non-goals of this module**: workload create/update/delete, Helm management, GitOps, cluster creation (kubeadm/k3s install wizards).

@@ -32,39 +32,39 @@
 </style>
 </head>
 <body>
-<h1>Ansible GUI <span style="color:#8b93a7;font-weight:400;font-size:13px">— 後端骨架 demo</span></h1>
-<div class="sub">鏈路：瀏覽器 → REST → 背景執行緒跑 ansible-runner → SSH → 主機 → WebSocket 即時回傳</div>
+<h1>Ansible GUI <span style="color:#8b93a7;font-weight:400;font-size:13px">— backend skeleton demo</span></h1>
+<div class="sub">Chain: browser → REST → background thread runs ansible-runner → SSH → host → WebSocket live events</div>
 
 <div class="grid">
   <div>
     <div class="card">
-      <h2>新增主機</h2>
-      <label>名稱</label><input id="f-name" value="testbox" placeholder="k3s-worker-01">
+      <h2>Add host</h2>
+      <label>Name</label><input id="f-name" value="testbox" placeholder="k3s-worker-01">
       <div class="row">
-        <div><label>IP / 主機名</label><input id="f-addr" value="127.0.0.1"></div>
+        <div><label>IP / hostname</label><input id="f-addr" value="127.0.0.1"></div>
         <div><label>Port</label><input id="f-port" value="22"></div>
       </div>
-      <label>SSH 使用者</label><input id="f-user" value="root">
-      <label>SSH 私鑰</label><textarea id="f-key" rows="4" placeholder="-----BEGIN OPENSSH PRIVATE KEY----- ..."></textarea>
-      <button id="btn-add">＋ 新增（會做 keyscan 探測）</button>
+      <label>SSH user</label><input id="f-user" value="root">
+      <label>SSH private key</label><textarea id="f-key" rows="4" placeholder="-----BEGIN OPENSSH PRIVATE KEY----- ..."></textarea>
+      <button id="btn-add">+ Add (runs keyscan probe)</button>
       <div id="add-msg" class="empty" style="margin-top:8px"></div>
     </div>
     <div class="card">
-      <h2>主機清單</h2>
-      <div id="hosts"><div class="empty">尚未新增主機</div></div>
+      <h2>Hosts</h2>
+      <div id="hosts"><div class="empty">no hosts yet</div></div>
     </div>
   </div>
 
   <div>
     <div class="card">
-      <h2>執行 ping 測試</h2>
-      <div class="empty" style="margin-bottom:8px">勾選左側主機後執行。ansible 會經 SSH 連線跑 ping module。</div>
-      <button class="primary" id="btn-run">▶ 對勾選的主機執行 ping</button>
+      <h2>Run ping test</h2>
+      <div class="empty" style="margin-bottom:8px">Select hosts on the left, then run. Ansible connects over SSH and runs the ping module.</div>
+      <button class="primary" id="btn-run">▶ Ping selected hosts</button>
       <span id="job-status"></span>
     </div>
     <div class="card">
-      <h2>即時日誌 <span class="dim" style="color:#5b6378;font-size:11px;font-weight:400">— WebSocket 串流</span></h2>
-      <div class="log" id="log"><div class="dim">// 等待任務…</div></div>
+      <h2>Live log <span class="dim" style="color:#5b6378;font-size:11px;font-weight:400">— WebSocket stream</span></h2>
+      <div class="log" id="log"><div class="dim">// waiting for job…</div></div>
     </div>
   </div>
 </div>
@@ -76,7 +76,7 @@ let hostList = [];
 async function refreshHosts() {
   const r = await fetch('/api/hosts');
   hostList = await r.json();
-  $('hosts').innerHTML = hostList.length ? '' : '<div class="empty">尚未新增主機</div>';
+  $('hosts').innerHTML = hostList.length ? '' : '<div class="empty">no hosts yet</div>';
   hostList.forEach(h => {
     const d = document.createElement('div');
     d.className = 'host';
@@ -92,36 +92,36 @@ async function refreshHosts() {
 }
 
 $('btn-add').onclick = async () => {
-  $('add-msg').textContent = '探測中…';
+  $('add-msg').textContent = 'probing…';
   const body = { name: $('f-name').value, address: $('f-addr').value,
     port: +$('f-port').value || 22, username: $('f-user').value, private_key: $('f-key').value };
   const r = await fetch('/api/hosts', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
   const j = await r.json();
-  $('add-msg').textContent = r.ok ? `✓ 已新增（keyscan 通過）` : `✕ ${j.detail || '失敗'}`;
+  $('add-msg').textContent = r.ok ? `✓ added (keyscan ok)` : `✕ ${j.detail || 'failed'}`;
   if (r.ok) { $('f-key').value = ''; refreshHosts(); }
 };
 
 $('btn-run').onclick = async () => {
   const ids = [...document.querySelectorAll('#hosts input[type=checkbox]:checked')].map(c => c.dataset.id);
-  if (!ids.length) { alert('先勾選主機'); return; }
+  if (!ids.length) { alert('select hosts first'); return; }
   const r = await fetch('/api/jobs', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({host_ids: ids})});
   const {job_id} = await r.json();
-  $('job-status').innerHTML = `<span class="status st-run">● 執行中 ${job_id}</span>`;
+  $('job-status').innerHTML = `<span class="status st-run">● running ${job_id}</span>`;
   $('log').innerHTML = '';
   const ws = new WebSocket(`ws://${location.host}/ws/jobs/${job_id}`);
   ws.onmessage = ev => {
     const e = JSON.parse(ev.data);
     const line = document.createElement('div');
-    if (e.type === 'job_started') line.innerHTML = `<span class="inf">▶ 任務開始</span>`;
+    if (e.type === 'job_started') line.innerHTML = `<span class="inf">▶ job started</span>`;
     else if (e.type === 'task_start') line.innerHTML = `<span class="dim">TASK</span> ${e.task}`;
     else if (e.type === 'host_ok') line.innerHTML = `<span class="ok">✓ ok</span> <span class="dim">[${e.host}]</span> ${e.task}`;
     else if (e.type === 'host_failed') line.innerHTML = `<span class="bad">✕ failed</span> <span class="dim">[${e.host}]</span> ${e.task} — ${e.msg}`;
     else if (e.type === 'host_unreachable') line.innerHTML = `<span class="bad">✕ unreachable</span> <span class="dim">[${e.host}]</span> — ${e.msg}`;
     else if (e.type === 'job_finished') {
-      line.innerHTML = `<span class="inf">■ 任務結束</span>`;
+      line.innerHTML = `<span class="inf">■ job finished</span>`;
       fetch('/api/jobs/' + job_id).then(r => r.json()).then(j => {
         $('job-status').innerHTML = j.status === 'successful'
-          ? `<span class="status st-ok">✓ 成功</span>` : `<span class="status st-fail">✕ 失敗</span>`;
+          ? `<span class="status st-ok">✓ successful</span>` : `<span class="status st-fail">✕ failed</span>`;
       });
       setTimeout(() => ws.close(), 300);
     }

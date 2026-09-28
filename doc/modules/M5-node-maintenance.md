@@ -1,90 +1,90 @@
-# M5 — Worker Node 維運
+# M5 — Worker Node Maintenance
 
-> 目標：把「cordon→drain→patch/升級→驗證→uncordon」這套人肉流程做成一鍵工作流；這是本專案與 AWX、Rancher 拉開差距的核心。
+> Goal: turn the manual "cordon→drain→patch/upgrade→verify→uncordon" grind into a one-click workflow; this is the core differentiator against AWX and Rancher.
 
-## 5.1 一鍵節點維護工作流
+## 5.1 One-click node maintenance workflow
 
-**說明**：選節點、選維護類型、按開始，剩下的照劇本走；人只負責看和拍板異常。
+**Description**: pick nodes, pick a maintenance type, press start — the playbook runs itself; humans just watch and decide on anomalies.
 
-**使用場景**：k3s-worker-03 有版本漂移（v1.30.5，期望 v1.31.2）。Dylan 在節點列表點「升級」，進維護頁確認參數後按開始；系統逐台跑完 cordon→drain→kubelet 升級→驗證→uncordon，全程在頁面上看即時進度。
+**Scenario**: k3s-worker-03 has version drift (v1.30.5, expected v1.31.2). Dylan clicks "Upgrade" on the node list, confirms parameters on the maintenance page, presses start; the system runs cordon→drain→kubelet upgrade→verify→uncordon node by node, with live progress on the page.
 
-**功能細節**
-- 固定六步劇本：①前置檢查（5.3）→ ②cordon → ③drain → ④執行維護 playbook → ⑤健康驗證 → ⑥uncordon → 下一台
-- 維護類型三選一：OS 安全更新（內建 `os-security-update`）、K8s 元件升級（內建 `kubelet-upgrade`，需填目標版本）、自訂（選任意 Job Template 當第④步）
-- 頁面佈局：左側步驟條（當前步驟高亮、已完成打勾）、中央當前節點即時 log、右側節點佇列（待處理/進行中/完成/失敗四態）
-- 第⑤步健康驗證內容：Node Ready=True、kubelet 版本符合預期、關鍵 DaemonSet 在該節點的 Pod 恢復 Running；任一不通過視為該台失敗
-- 整批完成後產出摘要報告：每台耗時、變更內容（如升級了 14 個套件）、失敗台與原因
+**Details**
+- Fixed six-step play: ① preflight checks (5.3) → ② cordon → ③ drain → ④ run maintenance playbook → ⑤ health verification → ⑥ uncordon → next node
+- Three maintenance types: OS security update (built-in `os-security-update`), K8s component upgrade (built-in `kubelet-upgrade`, target version required), custom (any Job Template as step ④)
+- Page layout: left step rail (current step highlighted, completed steps checked), center live log of the current node, right node queue (four states: pending/in-progress/done/failed)
+- Step ⑤ health verification covers: Node Ready=True, kubelet version as expected, key DaemonSets' Pods on the node back to Running; any failure marks the node failed
+- A summary report after the batch: per-node duration, what changed (e.g. 14 packages upgraded), failed nodes with reasons
 
-**資料模型要點**：`maintenance_runs(id, type, target_version, node_queue JSON, status, current_step, per_node_result JSON, created_by)`；底層以 M3.7 Workflow 實作，六步即六個節點。
+**Data model notes**: `maintenance_runs(id, type, target_version, node_queue JSON, status, current_step, per_node_result JSON, created_by)`; implemented on top of the M3.7 Workflow — the six steps are six nodes.
 
-**驗收標準**：3 台測試 worker 的 rolling OS patch 全程在 GUI 完成、零人肉 SSH；中途關掉瀏覽器重開，進度正確恢復顯示。
+**Acceptance criteria**: a rolling OS patch across 3 test workers completes fully in the GUI with zero manual SSH; closing and reopening the browser mid-run restores the progress view correctly.
 
-## 5.2 執行控制
+## 5.2 Execution control
 
-**說明**：維運最怕失控；任何時刻人都要能喊停。
+**Description**: ops' biggest fear is losing control; a human must be able to call a stop at any moment.
 
-**功能細節**
-- 強制 `serial=1`：永遠一次只動一台，此為不可覆寫的安全底線
-- 任一節點失敗 → 整批自動暫停（不是繼續下一台），提供三選一：重試本台 / 跳過本台繼續 / 中止整批
-- 手動暫停/恢復：暫停只在「步與步之間」生效，不會把跑到一半的 drain 掐斷；恢復從斷點繼續
-- 已完成的節點不可單獨重跑（避免重複 patch）；要重跑只能整批重來並明確標示
-- 中止後：已 uncordon 的節點保持原狀，正在處理的節點走安全收尾（完成當前步→uncordon→停止）
+**Details**
+- Forced `serial=1`: always one node at a time — a non-overridable safety bottom line
+- Any node failure → the whole batch auto-pauses (not "continue to next node"), offering three choices: retry this node / skip this node and continue / abort the batch
+- Manual pause/resume: pause takes effect only "between steps" — it won't kill a drain mid-flight; resume continues from the breakpoint
+- Finished nodes can't be re-run individually (avoids double-patching); re-runs must restart the whole batch, clearly labeled
+- After abort: already-uncordoned nodes stay as-is; the node in progress goes through a safe wind-down (finish current step → uncordon → stop)
 
-**驗收標準**：在 drain 進行中按暫停，drain 跑完才停住，下一步不執行；選「跳過」後下一台正常開始。
+**Acceptance criteria**: pressing pause mid-drain lets the drain finish, then halts before the next step; after "skip", the next node starts normally.
 
-## 5.3 維護前檢查清單
+## 5.3 Pre-maintenance checklist
 
-**說明**：開始前先把會翻車的條件攤開，不通過就擋下，不讓問題在半夜爆。
+**Description**: surface everything that could go wrong before starting — block on failures instead of letting problems blow up overnight.
 
-**功能細節**
-- 自動檢查項（開始前全部跑一遍）：
-  1. control plane 健康（API 可達、etcd  quorum 正常）
-  2. PDB 阻擋分析：列出會卡住 drain 的 PDB 與受影響 workload，給「先處理」建議
-  3. 單副本 workload 警告：點名 drain 後會中斷服務的 Pod（replicas=1 且非 DaemonSet）
-  4. 目標節點磁碟空間（升級需 > 2GB 可用，否則阻擋）
-  5. 版本 diff：當前版本 vs 目標版本，跨 minor 版（如 1.30→1.32）跳出額外警告（K8s 只支援逐版升級）
-  6. 備援容量：drain 後剩餘可調度資源是否足夠容納被驅逐 Pod
-- 檢查結果分三級：通過（綠）/ 警告（琥珀，可勾選「我已知悉」放行）/ 阻擋（紅，不處理不能開始）
-- 檢查報告可匯出，附在維護摘要裡
+**Details**
+- Auto-checks (all run once before starting):
+  1. control plane health (API reachable, etcd quorum OK)
+  2. PDB block analysis: list PDBs that would block drain and affected workloads, with "handle first" advice
+  3. single-replica workload warning: call out by name the Pods that would lose service after drain (replicas=1 and not a DaemonSet)
+  4. target node disk space (upgrade needs > 2GB free, otherwise blocked)
+  5. version diff: current vs target; cross-minor jumps (e.g. 1.30→1.32) raise an extra warning (K8s only supports sequential upgrades)
+  6. spare capacity: whether remaining schedulable resources can absorb the evicted Pods after drain
+- Results in three tiers: pass (green) / warning (amber, can be waived with "I acknowledge") / blocker (red, must be resolved before starting)
+- The check report is exportable and attached to the maintenance summary
 
-**驗收標準**：故意在一個有單副本關鍵服務的節點上開始維護，檢查清單正確點名該服務並列為警告；磁碟不足時被紅色阻擋且無法開始。
+**Acceptance criteria**: starting maintenance on a node with a single-replica critical service correctly calls out that service as a warning; insufficient disk triggers a red blocker that prevents starting.
 
-## 5.4 版本漂移偵測（P1）
+## 5.4 Version drift detection (P1)
 
-**說明**：持續比對「期望版本」與「實際版本」，把待升級清單自動算出來，而不是靠人肉 `kubectl get nodes`。
+**Description**: continuously compare "expected" vs "actual" versions so the to-upgrade list computes itself instead of relying on manual `kubectl get nodes`.
 
-**使用場景**：Dylan 在群組變數宣告 `k8s_version: v1.31.2`；一週後系統發現 k3s-worker-03 還在 v1.30.5，儀表板出現琥珀色 badge，待辦區可一鍵把這 3 台丟進維護佇列。
+**Scenario**: Dylan declares `k8s_version: v1.31.2` in group variables; a week later the system finds k3s-worker-03 still on v1.30.5; the dashboard shows an amber badge, and the todo area can throw those 3 nodes into the maintenance queue with one click.
 
-**功能細節**
-- 期望版本宣告位置：群組變數（`k8s_version`、`kubelet_version`、`os_patch_level`），支援「latest」語意（以叢集內多數節點版本為準）
-- 每天一次（可設）全量比對；比對維度：K8s 版本、kubelet、containerd、OS 安全更新數
-- 漂移分級：小版落後（1.31.1→1.31.2，琥珀）/ minor 落後（1.30→1.31，橘紅）/ 超前（有人手動升過，藍色提醒確認）
-- 待辦區「一鍵加入維護佇列」：自動建一個 5.1 維護 run，目標版本帶入期望值
+**Details**
+- Expected versions are declared in group variables (`k8s_version`, `kubelet_version`, `os_patch_level`); "latest" means the majority version across the cluster
+- Full comparison daily (configurable); dimensions: K8s version, kubelet, containerd, OS security update count
+- Drift tiers: patch behind (1.31.1→1.31.2, amber) / minor behind (1.30→1.31, orange-red) / ahead (someone upgraded manually, blue — asks for confirmation)
+- Todo area "add to maintenance queue in one click": auto-creates a 5.1 maintenance run with the expected value as target version
 
-**驗收標準**：把一台測試節點手動降版，24 小時內漂移清單正確出現且分級正確。
+**Acceptance criteria**: manually downgrade a test node — it shows up in the drift list with the correct tier within 24 hours.
 
-## 5.5 rolling reboot 編排（P1）
+## 5.5 Rolling reboot orchestration (P1)
 
-**說明**：kernel 升級後需要重啟的標準動作，同樣走安全劇本。
+**Description**: the standard post-kernel-upgrade reboot, same safe playbook.
 
-**功能細節**
-- 劇本：drain → reboot → 等待 SSH 恢復 → 等待 Node Ready（超時 10 分鐘可調）→ uncordon → 下一台
-- 觸發方式：OS patch 維護後自動偵測「需要重啟」（`/var/run/reboot-required` 存在）→ 詢問是否接著跑 rolling reboot；也可手動單獨發起
-- 重啟前對該節點做一次快照式記錄（當時 Pod 分佈），重啟後比對確認服務恢復
+**Details**
+- Play: drain → reboot → wait for SSH to come back → wait for Node Ready (timeout 10 min, adjustable) → uncordon → next node
+- Trigger: after an OS patch maintenance, auto-detect "reboot required" (`/var/run/reboot-required` exists) → ask whether to run rolling reboot next; can also be started manually
+- Before rebooting a node, take a snapshot record of its Pod distribution; compare after reboot to confirm services recovered
 
-**驗收標準**：3 台需重啟的節點跑完，每台重啟期間服務不中斷（以測試服務的連續探測證明）。
+**Acceptance criteria**: 3 nodes needing reboot complete; services stay uninterrupted during each reboot (proven by continuous probing of a test service).
 
-## 5.6 批次維護佇列（P1）
+## 5.6 Batched maintenance queue (P1)
 
-**說明**：跨天、跨叢集的維護排隊，一次規劃、分批執行。
+**Description**: plan once, execute in batches — maintenance queues spanning days and clusters.
 
-**功能細節**
-- 佇列可加入來自不同叢集的節點、不同維護類型；可拖曳排序、設定每批之間的間隔（如每台間隔 30 分鐘，給監控留觀察窗）
-- 佇列可存成「維護計畫」範本（如「每月 patch Tuesday 計畫」），下個月一鍵載入
-- 執行中佇列支援插隊（緊急節點優先）與移除待處理節點
+**Details**
+- The queue accepts nodes from different clusters and different maintenance types; drag-to-reorder, configurable interval between batches (e.g. 30 minutes between nodes, leaving an observation window for monitoring)
+- Queues can be saved as "maintenance plan" templates (e.g. "monthly Patch Tuesday plan") and loaded with one click next month
+- A running queue supports queue-jumping (emergency nodes go next) and removing pending nodes
 
-**驗收標準**：建一個 6 台、間隔 30 分鐘的佇列，執行順序與間隔符合設定；中途插隊一台緊急節點，它成為下一台。
+**Acceptance criteria**: build a 6-node queue with 30-minute intervals — execution order and spacing match the settings; inserting an emergency node mid-run makes it the next one up.
 
 ---
 
-**本模組 Non-goals**：自動化故障自癒（不做 operator 那套）、跨雲的節點替換（blue-green 換機）、韌體/BMC 層操作。
+**Non-goals of this module**: automated self-healing (not doing the operator thing), cross-cloud node replacement (blue-green machine swaps), firmware/BMC-layer operations.

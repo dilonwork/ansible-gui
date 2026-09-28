@@ -1,46 +1,46 @@
-# M9 — 儀表板
+# M9 — Dashboard
 
-> 目標：打開第一眼回答三件事——有沒有壞東西、接下來要做什麼、正在發生什麼事。版面設計見 `doc/dashboard-design.md`，此處只定規格（每個數字的定義、來源、更新頻率）。
+> Goal: the first glance answers three things — is anything broken, what's next, what's happening right now. Layout is in `doc/dashboard-design.md`; this doc only specifies each number (definition, source, refresh rate).
 
-## 9.1 總覽儀表板
+## 9.1 Overview dashboard
 
-**說明**：系統首頁；所有 KPI 都有明確定義，避免「這個數字到底怎麼算的」。
+**Description**: the system home page; every KPI has an explicit definition so nobody asks "how is this number even computed".
 
-**使用場景**：Dylan 每天早上打開，先掃 KPI 行：待升級節點是不是 0、昨晚排程成功率如何，再決定今天要不要處理。
+**Scenario**: Dylan opens it every morning, scans the KPI row: are nodes pending upgrade at 0, how did last night's scheduled success rate look — then decides whether today needs action.
 
-**功能細節**（KPI 定義與資料來源）
-- 受管主機：在線 x/y —— 來源 M1.3 可達性探測；更新頻率 5 分鐘（與探測週期一致）
-- K8s 叢集：n 個叢集、共 m 節點 —— 來源 M4.1/M4.2；30 秒更新
-- 節點待升級：版本漂移（M5.4）＋待 OS patch（M1.6）去重後的節點數；每天比對後更新，手動「立即檢測」可刷新
-- 進行中任務：狀態為 running 的任務數，點入跳即時日誌（M6.1）；WebSocket 即時
-- 近 7 天任務成功率：成功任務數 / 總任務數（試跑不計入）；每小時重算
-- 區塊：叢集健康卡（M4.2）、Worker 節點表精簡版（M4.3 前 5 列＋異常置頂）、進行中任務即時日誌（M6.1 末 6 行）、待辦維運（M5.4＋M1.6＋下次排程）、快速動作（新增主機/建立任務/節點維護/新增排程）
-- 待辦每條都是行動入口：點「3 節點版本漂移」→ 跳維護頁且 3 台已預選（減少操作步驟是刻意設計）
+**Details** (KPI definitions and sources)
+- Managed hosts: online x/y — source: M1.3 reachability probing; 5-minute refresh (matches probe cadence)
+- K8s clusters: n clusters, m nodes total — source: M4.1/M4.2; 30-second refresh
+- Nodes pending upgrade: deduplicated node count from version drift (M5.4) + pending OS patches (M1.6); recomputed on daily comparison, "check now" refreshes manually
+- Running jobs: count of jobs with running status; click through to the live log (M6.1); real-time over WebSocket
+- 7-day job success rate: successful jobs / total jobs (dry runs excluded); recomputed hourly
+- Blocks: cluster health card (M4.2), worker node table slim version (M4.3, first 5 rows + anomalies pinned top), running-job live log (M6.1, last 6 lines), ops todo (M5.4 + M1.6 + next schedule), quick actions (add host / create job / node maintenance / add schedule)
+- Every todo is an action entry: clicking "3 nodes with version drift" jumps to the maintenance page with the 3 nodes pre-selected (fewer steps by design)
 
-**驗收標準**：每個 KPI 旁有 ⓘ，hover 顯示定義與更新時間；任一數字點得進去看到明細（沒有死數字）。
+**Acceptance criteria**: every KPI has a ⓘ; hover shows the definition and update time; every number is clickable into its detail (no dead numbers).
 
-## 9.2 趨勢圖（P1）
+## 9.2 Trend charts (P1)
 
-**說明**：從「現在」延伸到「最近怎麼樣」，看出退化趨勢。
+**Description**: extend "now" into "how have things been lately" — spot degradation trends.
 
-**功能細節**
-- 任務成功率曲線（日粒度，近 30 天）、執行次數柱狀圖、平均耗時線；三圖時間軸聯動
-- 時間範圍切換：7 天 / 30 天 / 90 天；可按 template 篩選（只看某個 template 的趨勢）
-- 異常標註：成功率驟降的日期自動標點，hover 顯示當天失敗任務連結
+**Details**
+- Job success-rate curve (daily granularity, last 30 days), run-count bars, average-duration line; the three charts share a linked time axis
+- Range switch: 7 / 30 / 90 days; filterable by template (trends for one template only)
+- Anomaly markers: dates with sharp success-rate drops are auto-marked; hover shows links to that day's failed jobs
 
-**驗收標準**：切換時間範圍 < 1 秒重繪；標註點能正確連到當天失敗任務。
+**Acceptance criteria**: switching ranges re-renders in < 1 second; markers link correctly to that day's failed jobs.
 
-## 9.3 容量趨勢（P2）
+## 9.3 Capacity trends (P2)
 
-**說明**：回答「這批節點還能撐多久」，做擴容決策的依據。
+**Description**: answers "how much longer can these nodes hold" — the basis for scaling decisions.
 
-**功能細節**
-- 指標：節點 CPU/記憶體/磁碟使用率歷史線；叢集維度聚合＋單節點下鑽
-- 資料來源：metrics-server（輕量預設）或 Prometheus（已有的人接這個）；保留 90 天，日粒度降採樣
-- 閾值線：記憶體 > 85% 持續 7 天的節點自動列入「建議擴容/遷移」清單（只建議、不自動動作）
+**Details**
+- Metrics: per-node CPU/memory/disk usage history lines; cluster-level aggregation + per-node drill-down
+- Sources: metrics-server (lightweight default) or Prometheus (for those who already have it); 90 days retained, downsampled to daily
+- Threshold lines: nodes with memory > 85% for 7 straight days auto-list in a "consider scale-out/migration" list (suggest only, never auto-act)
 
-**驗收標準**：接上 metrics-server 的測試叢集，24 小時後能看到連續曲線；Prometheus 模式與 metrics-server 模式數字一致（±5%）。
+**Acceptance criteria**: a test cluster with metrics-server shows a continuous curve after 24 hours; Prometheus mode and metrics-server mode agree (±5%).
 
 ---
 
-**本模組 Non-goals**：自訂拖拽式 dashboard builder、多租戶的個人化首頁、TV wall 模式。
+**Non-goals of this module**: custom drag-and-drop dashboard builder, multi-tenant personalized home pages, TV wall mode.

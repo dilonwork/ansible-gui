@@ -1,66 +1,66 @@
-# M8 — 告警通知
+# M8 — Notifications
 
-> 目標：該知道的事主動推到人面前；規則可配、半夜可靜音，手機（LINE）是第一優先管道。
+> Goal: push what people need to know in front of them; rules configurable, quiet hours respected, mobile (LINE) is the first-priority channel.
 
-## 8.1 任務通知（P1）
+## 8.1 Job notifications (P1)
 
-**說明**：任務有結果就推播，不用一直盯著 log。
+**Description**: push on job outcome — no need to stare at logs.
 
-**使用場景**：週日凌晨 02:00 的排程 patch 跑完，Dylan 起床在 LINE 看到「成功 9/9，耗時 18 分鐘」，不用開電腦確認。
+**Scenario**: the Sunday 02:00 scheduled patch finishes; Dylan wakes up to a LINE message: "9/9 succeeded, took 18 minutes" — no need to open a computer.
 
-**功能細節**
-- 事件：任務成功 / 任務失敗（含失敗主機清單摘要）/ 任務被審批駁回 / 排程漏跑（見 8.2）
-- 通知內容：任務名、目標範圍、成功 x/y 台、耗時、詳情連結（一鍵跳任務歷史）
-- 可按 template 設定通知策略：只通知失敗 / 都通知 / 不通知（吵的例行任務可關）
+**Details**
+- Events: job success / job failure (with failed-host summary) / job rejected by approver / schedule missed (see 8.2)
+- Content: job name, target scope, x/y hosts succeeded, duration, detail link (one tap into job history)
+- Per-template notification policy: notify on failure only / notify always / never (noisy routine jobs can be muted)
 
-**驗收標準**：一個 3 台中有 1 台失敗的任務，通知正確寫「成功 2/3」並列出失敗主機名。
+**Acceptance criteria**: a job with 1 of 3 hosts failed notifies "2/3 succeeded" and lists the failed hostname.
 
-## 8.2 節點異常通知（P1）
+## 8.2 Node anomaly notifications (P1)
 
-**說明**：機器與叢集出狀況時的主動告警。
+**Description**: proactive alerts when machines and clusters misbehave.
 
-**功能細節**
-- 事件：節點 NotReady / NotReady 恢復、SSH 可達性翻轉（M1.3）、版本漂移發現（M5.4）、憑證即將過期（M7）、排程漏跑
-- 去重與收斂：同一節點 1 小時內重複 NotReady 只推一次，恢復後重置；避免告警風暴
-- 嚴重度分級：紅（NotReady、任務失敗）/ 琥珀（漂移、憑證將過期）；紅色事件忽略靜默時段（見下方規則引擎）
+**Details**
+- Events: node NotReady / NotReady recovered, SSH reachability flips (M1.3), version drift found (M5.4), credential expiring (M7), schedule missed
+- Dedup and convergence: repeat NotReady from the same node within 1 hour pushes only once, reset on recovery; no alert storms
+- Severity tiers: red (NotReady, job failure) / amber (drift, expiring credential); red events ignore quiet hours (see rule engine below)
 
-**驗收標準**：拔掉一台測試機網路，5 分鐘內收到 NotReady 通知；1 小時內不重複推送；恢復後收到恢復通知。
+**Acceptance criteria**: unplug a test machine's network — NotReady notification arrives within 5 minutes; no repeat push within 1 hour; recovery notification arrives after it's back.
 
-## 8.3 LINE 推播（P1）
+## 8.3 LINE push (P1)
 
-**說明**：台灣團隊最常用的手機管道；審批場景（M3.6）的主戰場。
+**Description**: the most-used mobile channel for Taiwan teams; the main battleground for the approval scenario (M3.6).
 
-**使用場景**：Dylan 在外面收到 LINE：「kubelet-upgrade／目標 3 台 worker／申請人 Dylan」，點連結看參數摘要，按「核准」後任務開始跑。
+**Scenario**: Dylan gets a LINE message while out: "kubelet-upgrade / target: 3 workers / requester: Dylan"; tapping the link shows the parameter summary, pressing "Approve" starts the job.
 
-**功能細節**
-- 走 LINE Messaging API（可一對一推播＋按鈕）；初期也支援 LINE Notify 簡易版
-- 審批請求訊息含：template 名、目標、參數摘要、申請人，以及「核准／駁回」按鈕（點按鈕開審批頁，手機瀏覽器完成身份驗證後生效，不在聊天室內直接執行以保安全）
-- 綁定：使用者在個人設定綁 LINE（掃碼配對），一人一綁
+**Details**
+- Via the LINE Messaging API (1:1 push + buttons); LINE Notify supported as the simple flavor initially
+- Approval request messages include: template name, targets, parameter summary, requester, plus "Approve / Reject" buttons (tapping opens the approval page; identity is verified in the mobile browser before taking effect — never executed directly inside the chat, for safety)
+- Binding: users bind LINE in personal settings (QR-code pairing), one binding per person
 
-**驗收標準**：從審批請求產生到 LINE 收到 < 30 秒；未綁定 LINE 的審批人改走 Email，不丟失請求。
+**Acceptance criteria**: < 30 seconds from approval request creation to LINE delivery; approvers without LINE bound fall back to Email — no request is lost.
 
-## 8.4 Slack / Teams（P2）
+## 8.4 Slack / Teams (P2)
 
-**說明**：跨國/跨團隊協作時的管道補充。
+**Description**: supplementary channels for cross-border/cross-team collaboration.
 
-**功能細節**
-- Incoming Webhook 方式接入；訊息範本與 LINE 共用同一套事件渲染（換皮不換骨）
-- 頻道級訂閱：不同事件可推到不同頻道（如 #alerts 只收紅色事件）
+**Details**
+- Incoming Webhook integration; message templates share the same event rendering as LINE (same engine, different skin)
+- Channel-level subscriptions: different events can go to different channels (e.g. #alerts only gets red events)
 
-## 規則引擎與靜默時段（P1，與 8.1/8.2 共用）
+## Rule engine & quiet hours (P1, shared with 8.1/8.2)
 
-**說明**：通知的總開關矩陣，避免「什麼都推＝什麼都不看」。
+**Description**: the master switch matrix for notifications — avoiding "push everything = read nothing".
 
-**功能細節**
-- 規則＝事件類型 × 範圍（叢集/群組/全域）× 管道（Webhook/Email/LINE）；多條規則可疊加
-- 靜默時段：可設（如每日 00:00–07:00）；靜默期間琥珀事件只記錄不推送，紅色事件照推（可配）
-- 管道：
-- Webhook：通用 POST，payload 固定 schema（事件、嚴重度、時間、詳情連結），可接 PagerDuty/自研系統
-- Email：SMTP 設定（host/port/TLS/帳密），HTML＋純文字雙格式
-- 通知發送紀錄可查（發了沒發、發去哪、成功否），發送失敗重試 3 次後記為失敗並在 UI 標示
+**Details**
+- Rule = event type × scope (cluster/group/global) × channel (Webhook/Email/LINE); multiple rules stack
+- Quiet hours: configurable (e.g. daily 00:00–07:00); during quiet hours amber events are only recorded, never pushed; red events still push (configurable)
+- Channels:
+- Webhook: generic POST with a fixed payload schema (event, severity, time, detail link); can feed PagerDuty/home-grown systems
+- Email: SMTP settings (host/port/TLS/credentials), HTML + plain-text dual format
+- Notification delivery is queryable (sent or not, where to, success or not); failed sends retry 3 times, then marked failed and flagged in the UI
 
-**驗收標準**：設靜默時段後，琥珀事件在時段內只出現在通知紀錄、手機無推送；紅色事件照常推送。
+**Acceptance criteria**: with quiet hours set, amber events in-window appear only in the notification log with no phone push; red events still push.
 
 ---
 
-**本模組 Non-goals**：簡訊/語音電話告警、on-call 排班與升級策略（escalation policy）、告警事件的自動修復閉環。
+**Non-goals of this module**: SMS/voice-call alerts, on-call scheduling and escalation policy, closed-loop auto-remediation of alert events.

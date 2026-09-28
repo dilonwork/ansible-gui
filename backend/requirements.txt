@@ -2,3 +2,5 @@ fastapi>=0.115
 uvicorn[standard]>=0.30
 ansible-core>=2.17
 ansible-runner>=2.4
+sqlalchemy>=2.0
+psycopg2-binary>=2.9

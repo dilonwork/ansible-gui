@@ -6,7 +6,7 @@
 
 | Layer | Tool | What it covers | When it runs | How |
 |---|---|---|---|---|
-| L1 API tests | pytest + FastAPI TestClient | REST CRUD, job state machine, WS history replay, private key never leaked, snapshot freeze | on every backend change | `cd backend && python -m pytest tests/ -q` |
+| L1 API tests | pytest + FastAPI TestClient | REST CRUD, job state machine, WS history replay, private key never leaked, snapshot freeze | on every backend change | `cd backend && python -m pytest tests/ -q` (runs against a temp SQLite DB via `DATABASE_URL`; no PostgreSQL needed) |
 | L2 frontend build | tsc + vite build | type errors, build failures | on every frontend change | `cd frontend && npm run build` |
 | L3 E2E smoke | `scripts/e2e_smoke.sh` (python3 stdlib only) | real keyscan → add host → real SSH ansible ping → playbook + template + snapshot launch → verify event sequence → cleanup | after touching the SSH/execution chain, local verification | `BACKEND_URL=http://localhost:8000 ./scripts/e2e_smoke.sh` |
 | L4 manual acceptance | acceptance checklist (below) | MVP-level scenario: rolling patch across 3 workers, fully GUI-driven | end of each milestone | tick off against `doc/modules/` acceptance criteria |

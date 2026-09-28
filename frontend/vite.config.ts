@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// dev 時把 /api 與 /ws 代理到本機後端（skeleton 跑在 8000）
+// dev: proxy /api and /ws to the local backend (skeleton runs on 8000)
 export default defineConfig({
   plugins: [react()],
   server: {
