@@ -1,20 +1,19 @@
-"""Drydock backend (skeleton).
+"""Drydock backend.
 
 Flow: browser -> REST (hosts / playbooks / templates / jobs) ->
-background thread runs ansible-runner -> event_handler emits live ->
-WebSocket pushes to the frontend.
+Celery task runs ansible-runner in a worker process -> events flow back via
+the event bus (DB + Redis pub/sub) -> WebSocket pushes to the frontend.
 
 Persistence: SQLAlchemy; PostgreSQL under docker compose,
 SQLite file for local dev (DATABASE_URL selects).
 
 Deliberate simplifications (to be replaced later):
-- background execution uses threading (later: Celery + Redis)
 - no auth (later: login + RBAC)
-- private keys stored in cleartext (later: Vault-encrypted, M7)
 """
 import asyncio
+import logging
+import shutil
 import subprocess
-import threading
 import time
 import uuid
 
@@ -24,24 +23,46 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from . import events
+from .celery_app import celery
 from .db import init_db, session_scope
-from .crypto import decrypt_str, encrypt_str
+from .crypto import encrypt_str
 from .models import Host, Job, Playbook, Template
-from .runner_service import run_playbook, syntax_check_playbook
+from .runner_service import syntax_check_playbook
+from .tasks import TASK_KEY, RUNDIR_KEY, _finish_job, run_job_task
+
+log = logging.getLogger("drydock.main")
+
+
+def _reconcile_jobs() -> None:
+    """Mark jobs left 'running' with no live task as interrupted.
+
+    Happens when the web process died mid-job. A queued-but-unstarted task
+    still has its task key in Redis, so it is NOT marked interrupted.
+    """
+    r = events.get_redis()
+    with session_scope() as s:
+        running = s.query(Job).filter(Job.status == "running").all()
+    for job in running:
+        alive = r is not None and bool(r.exists(TASK_KEY.format(jid=job.id)))
+        if not alive:
+            if _finish_job(job.id, "interrupted"):
+                events.emit_event(job.id, {"type": "job_interrupted",
+                                           "msg": "backend restarted while job was running",
+                                           "ts": round(time.time(), 2)})
+                log.info("job %s marked interrupted (no live task)", job.id)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global loop
     init_db()
-    loop = asyncio.get_running_loop()
+    events.register_loop(asyncio.get_running_loop())
+    events.start_event_forwarder()
+    _reconcile_jobs()
     yield
 
 
-app = FastAPI(title="Drydock API (skeleton)", lifespan=lifespan)
-
-ws_queues: dict[str, list[asyncio.Queue]] = {}  # job_id -> [queues] (ephemeral)
-loop: asyncio.AbstractEventLoop | None = None
+app = FastAPI(title="Drydock API", lifespan=lifespan)
 
 PING_YML = """\
 - name: connectivity check
@@ -95,29 +116,22 @@ def keyscan(address: str, port: int) -> str:
     return "\n".join(lines)
 
 
-def emit(job_id: str, event: dict):
+def _launch_job(snapshot: dict) -> str:
+    """Persist a job row and enqueue it. Returns the job id."""
+    jid = uuid.uuid4().hex[:8]
     with session_scope() as s:
-        job = s.get(Job, job_id)
-        if job:
-            job.events = (job.events or []) + [event]
-    if loop is not None:
-        for q in ws_queues.get(job_id, []):
-            loop.call_soon_threadsafe(q.put_nowait, event)
-
-
-def _run_job_thread(job_id: str, job_hosts: list[dict], snapshot: dict):
-    ok = run_playbook(
-        job_id, job_hosts,
-        snapshot["playbook_content"],
-        snapshot["extra_vars"],
-        snapshot["check_mode"],
-        lambda e: emit(job_id, e),
-    )
-    with session_scope() as s:
-        job = s.get(Job, job_id)
-        if job:
-            job.status = "successful" if ok else "failed"
-            job.finished_at = time.time()
+        s.add(Job(id=jid, host_ids=snapshot["host_ids"], status="running",
+                  snapshot=snapshot, events=[], created_at=time.time(),
+                  finished_at=None))
+    events.ws_queues[jid] = []
+    result = run_job_task.delay(jid)
+    r = events.get_redis()
+    if r is not None:
+        try:
+            r.set(TASK_KEY.format(jid=jid), result.id, ex=86400)
+        except Exception:
+            pass
+    return jid
 
 
 def _host_public(h: Host) -> dict:
@@ -299,22 +313,7 @@ def create_job(j: JobIn):
                 "extra_vars": j.extra_vars or {},
                 "check_mode": False,
             }
-        host_rows = s.query(Host).filter(Host.id.in_(snapshot["host_ids"])).all()
-        job_hosts = [{"name": h.name, "address": h.address, "port": h.port,
-                      "username": h.username,
-                      "private_key": decrypt_str(h.private_key),
-                      "host_key": h.host_key} for h in host_rows]
-        jid = uuid.uuid4().hex[:8]
-        s.add(Job(id=jid, host_ids=snapshot["host_ids"], status="running",
-                  snapshot=snapshot, events=[], created_at=time.time(),
-                  finished_at=None))
-
-    ws_queues[jid] = []
-    t = threading.Thread(target=_run_job_thread,
-                         args=(jid, job_hosts, snapshot),
-                         daemon=True)
-    t.start()
-    return {"job_id": jid}
+    return {"job_id": _launch_job(snapshot)}
 
 
 @app.get("/api/jobs")
@@ -332,6 +331,70 @@ def get_job(jid: str):
         return _job_full(job)
 
 
+@app.post("/api/jobs/{jid}/cancel")
+def cancel_job(jid: str):
+    with session_scope() as s:
+        job = s.get(Job, jid)
+        if not job:
+            raise HTTPException(404, "no such job")
+        if job.status != "running":
+            raise HTTPException(400, f"job is not running (status={job.status})")
+
+    r = events.get_redis()
+    task_id = None
+    if r is not None:
+        try:
+            raw = r.get(TASK_KEY.format(jid=jid))
+            task_id = raw.decode() if isinstance(raw, bytes) else raw
+        except Exception:
+            pass
+    if task_id:
+        try:
+            celery.control.revoke(task_id, terminate=True)
+        except Exception as e:
+            log.warning("revoke failed for job %s: %s", jid, e)
+
+    # a terminated worker can't clean up; remove its temp dir (holds the 600 key file)
+    if r is not None:
+        try:
+            raw = r.get(RUNDIR_KEY.format(jid=jid))
+            rundir = raw.decode() if isinstance(raw, bytes) else raw
+            if rundir:
+                shutil.rmtree(rundir, ignore_errors=True)
+            r.delete(TASK_KEY.format(jid=jid), RUNDIR_KEY.format(jid=jid))
+        except Exception:
+            pass
+
+    if not _finish_job(jid, "cancelled"):
+        raise HTTPException(400, "job already finished")
+    events.emit_event(jid, {"type": "job_cancelled",
+                            "ts": round(time.time(), 2)})
+    return {"ok": True}
+
+
+@app.post("/api/jobs/{jid}/retry")
+def retry_job(jid: str):
+    with session_scope() as s:
+        job = s.get(Job, jid)
+        if not job:
+            raise HTTPException(404, "no such job")
+        if job.status != "failed":
+            raise HTTPException(400,
+                                f"only failed jobs can be retried (status={job.status})")
+        snapshot = dict(job.snapshot or {})
+        failed_names = {e.get("host") for e in (job.events or [])
+                        if e.get("type") in ("host_failed", "host_unreachable")
+                        and e.get("host")}
+        rows = s.query(Host).filter(
+            Host.id.in_(snapshot.get("host_ids", []))).all()
+        failed_ids = [h.id for h in rows if h.name in failed_names]
+    if not failed_ids:
+        raise HTTPException(400, "no failed hosts to retry")
+    snapshot["host_ids"] = failed_ids
+    snapshot["retried_from"] = jid
+    return {"job_id": _launch_job(snapshot)}
+
+
 # ---------- websocket: live event stream ----------
 @app.websocket("/ws/jobs/{jid}")
 async def job_stream(ws: WebSocket, jid: str):
@@ -344,7 +407,7 @@ async def job_stream(ws: WebSocket, jid: str):
         running = job.status == "running"
     await ws.accept()
     q: asyncio.Queue = asyncio.Queue()
-    ws_queues[jid].append(q)
+    events.ws_queues.setdefault(jid, []).append(q)
     try:
         # replay history first so late joiners miss nothing
         for e in history:
@@ -355,14 +418,14 @@ async def job_stream(ws: WebSocket, jid: str):
         while True:
             e = await q.get()
             await ws.send_json(e)
-            if e.get("type") == "job_finished":
+            if e.get("type") in ("job_finished", "job_cancelled"):
                 await asyncio.sleep(0.2)
                 break
     except WebSocketDisconnect:
         pass
     finally:
-        if q in ws_queues.get(jid, []):
-            ws_queues[jid].remove(q)
+        if q in events.ws_queues.get(jid, []):
+            events.ws_queues[jid].remove(q)
         await ws.close()
 
 

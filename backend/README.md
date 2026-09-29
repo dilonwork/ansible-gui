@@ -52,9 +52,20 @@ late WebSocket joiners get the full replay from the database.
 - `POST /api/playbooks/{id}/syntax-check` → `{ok, output}` via `ansible-playbook --syntax-check`
 - `POST /api/templates` {name, playbook_id, host_ids, extra_vars, check_mode} → job template
 - `GET /api/templates` / `DELETE /api/templates/{id}`
-- `POST /api/jobs` {template_id} or {host_ids} (+ optional check_mode / extra_vars overrides) → launch; the template's playbook content, vars and host list are frozen into a snapshot
+- `POST /api/jobs` {template_id} or {host_ids} (+ optional check_mode / extra_vars overrides) → enqueue on Celery; the template's playbook content, vars and host list are frozen into a snapshot
 - `GET /api/jobs` → job summaries; `GET /api/jobs/{id}` → status + snapshot + event history
+- `POST /api/jobs/{id}/cancel` → revoke the Celery task (terminate), clean up the worker temp dir, mark `cancelled`
+- `POST /api/jobs/{id}/retry` → new job with the same frozen snapshot, targeting only failed hosts
 - `WS /ws/jobs/{id}` → live event stream (history replayed first for late joiners)
+
+## Execution engine (Celery + Redis)
+
+- `app/celery_app.py`: broker + result backend = Redis (`REDIS_URL`, default `redis://localhost:6379/0`); `task_acks_late` so a dead worker redelivers instead of losing the job
+- `app/tasks.py`: `drydock.run_job` loads the snapshot + hosts from the DB, runs ansible-runner, and records the final status with an atomic `WHERE status='running'` transition (a concurrent cancel can't be overwritten)
+- `app/events.py`: cross-process event bus — every event is persisted to the job row, pushed to local WS queues, and published to Redis pub/sub; the web process forwards pub/sub messages to live WebSocket clients
+- Job statuses: `running → successful | failed | cancelled | interrupted` (`interrupted` = backend died mid-job with no live task; reconciled at startup)
+- Cancel: `celery.control.revoke(terminate=True)` + temp-dir cleanup (the 600 SSH key file) + `cancelled` status
+- Local dev: `./scripts/start-services.sh` (Redis via docker compose, or native `redis-server`); tests set `CELERY_EAGER=1` and run tasks inline, no Redis needed
 
 ## Security design (done)
 
@@ -66,6 +77,6 @@ late WebSocket joiners get the full replay from the database.
 ## To be replaced (skeleton simplifications)
 
 - ~~in-memory dicts → PostgreSQL~~ **done**: SQLAlchemy; PostgreSQL in compose, SQLite file for local dev
-- threading → Celery + Redis (long jobs, retry, cancel)
+- ~~threading → Celery + Redis (long jobs, retry, cancel)~~ **done**: Celery worker + Redis broker/pub-sub; cancel/retry/interrupted reconciliation (issue #1)
 - no auth → login + RBAC
 - ~~private key in DB cleartext → Vault-encrypted at rest (M7)~~ **done (skeleton)**: Fernet-encrypted at rest, key from `ENCRYPTION_KEY`; Vault/KMS integration is the M7 step

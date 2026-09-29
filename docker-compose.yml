@@ -9,10 +9,17 @@ services:
       - pgdata:/var/lib/postgresql/data
     # no published port: only the backend talks to it
 
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redisdata:/data
+    # no published port: only backend + worker talk to it
+
   backend:
     build: ./backend
     environment:
       DATABASE_URL: postgresql://ansible_gui:ansible_gui@postgres:5432/ansible_gui
+      REDIS_URL: redis://redis:6379/0
       # skeleton dev key; production must inject this from a secret manager (M7)
       ENCRYPTION_KEY: PPdr9t6K2PHDNDuctrDgSR0ZhW3I1QotZiVnFNFuvyc=
     expose:
@@ -21,6 +28,18 @@ services:
       - "8000:8000"
     depends_on:
       - postgres
+      - redis
+
+  worker:
+    build: ./backend
+    command: celery -A app.celery_app worker --loglevel=info --concurrency=4
+    environment:
+      DATABASE_URL: postgresql://ansible_gui:ansible_gui@postgres:5432/ansible_gui
+      REDIS_URL: redis://redis:6379/0
+      ENCRYPTION_KEY: PPdr9t6K2PHDNDuctrDgSR0ZhW3I1QotZiVnFNFuvyc=
+    depends_on:
+      - postgres
+      - redis
 
   frontend:
     build: ./frontend
@@ -28,8 +47,7 @@ services:
       - "3000:80"
     depends_on:
       - backend
-    # later:
-    # - redis (Celery broker; long jobs move off threads)
 
 volumes:
   pgdata:
+  redisdata:

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, jobWsUrl, type Job, type JobEvent } from '../api'
 
 function renderLine(e: JobEvent, i: number) {
@@ -16,6 +16,12 @@ function renderLine(e: JobEvent, i: number) {
       return <div key={i}><span className="r">✕ unreachable</span> <span className="dim">[{e.host}]</span> — {e.msg}</div>
     case 'job_finished':
       return <div key={i}><span className="b">■ Job finished</span></div>
+    case 'job_cancelled':
+      return <div key={i}><span className="b">■ Job cancelled</span></div>
+    case 'job_interrupted':
+      return <div key={i}><span className="r">■ Job interrupted — {e.msg}</span></div>
+    case 'job_error':
+      return <div key={i}><span className="r">✕ error — {e.msg}</span></div>
     default:
       return null
   }
@@ -23,8 +29,10 @@ function renderLine(e: JobEvent, i: number) {
 
 export default function JobDetail() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const [job, setJob] = useState<Job | null>(null)
   const [events, setEvents] = useState<JobEvent[]>([])
+  const [busy, setBusy] = useState(false)
   const logRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -42,7 +50,7 @@ export default function JobDetail() {
           const e = JSON.parse(ev.data) as JobEvent
           if (e.type === 'eof') { ws?.close(); return }
           setEvents(prev => [...prev, e])
-          if (e.type === 'job_finished') {
+          if (e.type === 'job_finished' || e.type === 'job_cancelled') {
             setTimeout(() => api.getJob(id).then(setJob).catch(() => {}), 500)
             setTimeout(() => ws?.close(), 500)
           }
@@ -64,6 +72,32 @@ export default function JobDetail() {
   const badHosts = new Set(events.filter(e => e.type === 'host_failed' || e.type === 'host_unreachable').map(e => e.host))
   const snap = job.snapshot
 
+  const doCancel = async () => {
+    if (!id || busy || !window.confirm('Cancel this running job?')) return
+    setBusy(true)
+    try {
+      await api.cancelJob(id)
+      setJob(await api.getJob(id))
+    } catch (e) {
+      alert(`Cancel failed: ${(e as Error).message}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const doRetry = async () => {
+    if (!id || busy) return
+    setBusy(true)
+    try {
+      const { job_id } = await api.retryJob(id)
+      navigate(`/jobs/${job_id}`)
+    } catch (e) {
+      alert(`Retry failed: ${(e as Error).message}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <>
       <div className="page-sub"><Link to="/jobs" className="mut">Jobs</Link> / <span className="mono">#{job.id}</span></div>
@@ -72,7 +106,17 @@ export default function JobDetail() {
         {job.status === 'running' && <span className="tag t-blue"><span className="pulse" />Running</span>}
         {job.status === 'successful' && <span className="tag t-green">✓ Success</span>}
         {job.status === 'failed' && <span className="tag t-red">✕ Failed</span>}
+        {job.status === 'cancelled' && <span className="tag t-amber">■ Cancelled</span>}
+        {job.status === 'interrupted' && <span className="tag t-red">■ Interrupted</span>}
         {snap.check_mode && <span className="tag t-amber">check mode (dry-run)</span>}
+        <span style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+          {job.status === 'running' && (
+            <button className="btn btn-danger" onClick={doCancel} disabled={busy}>■ Cancel</button>
+          )}
+          {job.status === 'failed' && badHosts.size > 0 && (
+            <button className="btn" onClick={doRetry} disabled={busy}>↻ Retry failed nodes ({badHosts.size})</button>
+          )}
+        </span>
       </div>
       <div className="page-sub">
         {new Date(job.created_at * 1000).toLocaleString('en-US', {hour12: false})}

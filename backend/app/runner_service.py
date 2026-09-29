@@ -62,9 +62,17 @@ def _simplify(event: dict) -> dict | None:
 
 
 def run_playbook(job_id: str, hosts: list[dict], playbook_content: str,
-                 extra_vars: dict, check_mode: bool, emit) -> bool:
-    """Runs in a background thread. emit(event_dict) is called live. Returns success."""
-    run_dir = tempfile.mkdtemp(prefix=f"ansible-gui-{job_id}-")
+                 extra_vars: dict, check_mode: bool, emit,
+                 on_run_dir=None) -> bool:
+    """Runs in a background worker. emit(event_dict) is called live. Returns success.
+
+    on_run_dir, when given, is called with the temp run dir path right after
+    creation so the caller can clean it up even if this process is killed
+    (e.g. job cancel terminates the worker).
+    """
+    run_dir = tempfile.mkdtemp(prefix=f"drydock-{job_id}-")
+    if on_run_dir is not None:
+        on_run_dir(run_dir)
     try:
         key_path = os.path.join(run_dir, "ssh_key")
         known_hosts_path = os.path.join(run_dir, "known_hosts")
@@ -107,7 +115,7 @@ def run_playbook(job_id: str, hosts: list[dict], playbook_content: str,
 
 def syntax_check_playbook(playbook_content: str) -> tuple[bool, str]:
     """Run `ansible-playbook --syntax-check` on the given YAML. Returns (ok, output)."""
-    run_dir = tempfile.mkdtemp(prefix="ansible-gui-syntax-")
+    run_dir = tempfile.mkdtemp(prefix="drydock-syntax-")
     try:
         pb_path = os.path.join(run_dir, "playbook.yml")
         with open(pb_path, "w") as f:

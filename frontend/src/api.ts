@@ -37,7 +37,7 @@ export interface JobSnapshot {
 }
 
 export interface JobEvent {
-  type: 'job_started' | 'task_start' | 'host_ok' | 'host_failed' | 'host_unreachable' | 'job_finished' | 'eof'
+  type: 'job_started' | 'task_start' | 'host_ok' | 'host_failed' | 'host_unreachable' | 'job_finished' | 'job_cancelled' | 'job_interrupted' | 'job_error' | 'eof'
   ts?: number
   host?: string
   task?: string
@@ -47,7 +47,7 @@ export interface JobEvent {
 export interface Job {
   id: string
   host_ids: string[]
-  status: 'running' | 'successful' | 'failed'
+  status: 'running' | 'successful' | 'failed' | 'cancelled' | 'interrupted'
   created_at: number
   finished_at: number | null
   snapshot: JobSnapshot
@@ -100,6 +100,8 @@ export const api = {
   createJob: (body: { host_ids?: string[]; template_id?: string; check_mode?: boolean; extra_vars?: Record<string, unknown> }) =>
     req<{ job_id: string }>('/api/jobs', { method: 'POST', body: JSON.stringify(body) }),
   getJob: (id: string) => req<Job>(`/api/jobs/${id}`),
+  cancelJob: (id: string) => req<{ ok: boolean }>(`/api/jobs/${id}/cancel`, { method: 'POST' }),
+  retryJob: (id: string) => req<{ job_id: string }>(`/api/jobs/${id}/retry`, { method: 'POST' }),
 }
 
 export function jobWsUrl(id: string): string {

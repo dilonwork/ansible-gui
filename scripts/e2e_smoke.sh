@@ -9,8 +9,11 @@
 #
 # Requirements:
 #   1. backend running at $BACKEND_URL (default http://localhost:8000)
-#   2. local sshd on 127.0.0.1:22 (test target; SKIP if missing)
-#   3. the script may append a temp pubkey to $SSH_USER's authorized_keys (removed on exit)
+#   2. Redis running on localhost:6379 (Celery broker; use scripts/start-services.sh)
+#   3. a Celery worker running:  celery -A app.celery_app worker --loglevel=info
+#      (from backend/, with the same DATABASE_URL / REDIS_URL / ENCRYPTION_KEY)
+#   4. local sshd on 127.0.0.1:22 (test target; SKIP if missing)
+#   5. the script may append a temp pubkey to $SSH_USER's authorized_keys (removed on exit)
 #
 # Usage: BACKEND_URL=http://localhost:8000 ./scripts/e2e_smoke.sh
 set -u

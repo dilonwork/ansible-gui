@@ -5,3 +5,5 @@ ansible-runner>=2.4
 sqlalchemy>=2.0
 psycopg2-binary>=2.9
 cryptography>=42
+celery>=5.4,<6
+redis>=5.0

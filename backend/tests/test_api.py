@@ -13,6 +13,7 @@ import types
 
 _tmp = tempfile.mkdtemp(prefix="ansible-gui-test-")
 os.environ["DATABASE_URL"] = f"sqlite:///{_tmp}/test.db"
+os.environ["CELERY_EAGER"] = "1"  # celery tasks run inline; no Redis needed
 
 import pytest
 from fastapi.testclient import TestClient
@@ -74,7 +75,7 @@ def _wait_done(client, jid, timeout=10):
     raise TimeoutError("job did not finish in time")
 
 
-def _fake_runner_ok(job_id, hosts, playbook_content, extra_vars, check_mode, emit):
+def _fake_runner_ok(job_id, hosts, playbook_content, extra_vars, check_mode, emit, on_run_dir=None):
     emit({"type": "job_started", "ts": 1.0})
     emit({"type": "task_start", "task": "ping via ssh", "ts": 1.1})
     for h in hosts:
@@ -206,7 +207,7 @@ def test_create_job_unknown_host_returns_400(client):
 
 
 def test_adhoc_ping_lifecycle(client, monkeypatch):
-    monkeypatch.setattr(main, "run_playbook", _fake_runner_ok)
+    monkeypatch.setattr("app.tasks.run_playbook", _fake_runner_ok)
     hid = _add_host(client)
     jid = client.post("/api/jobs", json={"host_ids": [hid]}).json()["job_id"]
     job = _wait_done(client, jid)
@@ -219,12 +220,12 @@ def test_adhoc_ping_lifecycle(client, monkeypatch):
 def test_job_from_template_freezes_snapshot(client, monkeypatch):
     captured = {}
 
-    def fake(job_id, hosts, playbook_content, extra_vars, check_mode, emit):
+    def fake(job_id, hosts, playbook_content, extra_vars, check_mode, emit, on_run_dir=None):
         captured.update(playbook_content=playbook_content, extra_vars=extra_vars,
                         check_mode=check_mode)
         return _fake_runner_ok(job_id, hosts, playbook_content, extra_vars, check_mode, emit)
 
-    monkeypatch.setattr(main, "run_playbook", fake)
+    monkeypatch.setattr("app.tasks.run_playbook", fake)
     hid = _add_host(client)
     pid = _add_playbook(client, content="- name: v1\n  hosts: all\n  gather_facts: false\n  tasks:\n    - ansible.builtin.ping:\n")
     tid = _add_template(client, pid, [hid], extra_vars={"a": 1}, check_mode=True)
@@ -250,11 +251,11 @@ def test_job_from_template_freezes_snapshot(client, monkeypatch):
 def test_job_launch_overrides_check_mode_and_extra_vars(client, monkeypatch):
     captured = {}
 
-    def fake(job_id, hosts, playbook_content, extra_vars, check_mode, emit):
+    def fake(job_id, hosts, playbook_content, extra_vars, check_mode, emit, on_run_dir=None):
         captured.update(extra_vars=extra_vars, check_mode=check_mode)
         return _fake_runner_ok(job_id, hosts, playbook_content, extra_vars, check_mode, emit)
 
-    monkeypatch.setattr(main, "run_playbook", fake)
+    monkeypatch.setattr("app.tasks.run_playbook", fake)
     hid = _add_host(client)
     pid = _add_playbook(client)
     tid = _add_template(client, pid, [hid], extra_vars={"a": 1, "b": 2}, check_mode=False)
@@ -266,7 +267,7 @@ def test_job_launch_overrides_check_mode_and_extra_vars(client, monkeypatch):
 
 
 def test_failed_runner_marks_job_failed(client, monkeypatch):
-    monkeypatch.setattr(main, "run_playbook",
+    monkeypatch.setattr("app.tasks.run_playbook",
                         lambda *a, **k: False)
     hid = _add_host(client)
     jid = client.post("/api/jobs", json={"host_ids": [hid]}).json()["job_id"]
@@ -300,7 +301,7 @@ def test_check_mode_reaches_ansible_runner(monkeypatch):
 
 # ---------- websocket ----------
 def test_ws_late_joiner_gets_history_then_eof(client, monkeypatch):
-    monkeypatch.setattr(main, "run_playbook", _fake_runner_ok)
+    monkeypatch.setattr("app.tasks.run_playbook", _fake_runner_ok)
     hid = _add_host(client)
     jid = client.post("/api/jobs", json={"host_ids": [hid]}).json()["job_id"]
     _wait_done(client, jid)  # job finishes first, WS connects late
@@ -318,3 +319,135 @@ def test_ws_unknown_job_rejected(client):
     with pytest.raises(Exception):
         with client.websocket_connect("/ws/jobs/nope"):
             pass
+
+
+# ---------- cancel / retry (issue #1) ----------
+def _add_running_job_row(job_id="cxl1"):
+    with session_scope() as s:
+        s.add(Job(id=job_id, host_ids=[], status="running",
+                  snapshot={"kind": "ad-hoc", "host_ids": [],
+                            "playbook_content": "x", "extra_vars": {},
+                            "check_mode": False},
+                  events=[], created_at=time.time(), finished_at=None))
+
+
+def test_cancel_marks_running_job_cancelled(client):
+    _add_running_job_row()
+    r = client.post("/api/jobs/cxl1/cancel")
+    assert r.status_code == 200, r.text
+    job = client.get("/api/jobs/cxl1").json()
+    assert job["status"] == "cancelled"
+    assert job["finished_at"] is not None
+    assert job["events"][-1]["type"] == "job_cancelled"
+
+
+def test_cancel_unknown_job_returns_404(client):
+    assert client.post("/api/jobs/nope/cancel").status_code == 404
+
+
+def test_cancel_finished_job_returns_400(client, monkeypatch):
+    monkeypatch.setattr("app.tasks.run_playbook", _fake_runner_ok)
+    hid = _add_host(client)
+    jid = client.post("/api/jobs", json={"host_ids": [hid]}).json()["job_id"]
+    _wait_done(client, jid)
+    assert client.post(f"/api/jobs/{jid}/cancel").status_code == 400
+
+
+def test_cancel_revokes_celery_task_and_cleans_rundir(client, monkeypatch, tmp_path):
+    import fakeredis
+    from app import events as events_mod
+    from app import tasks as tasks_mod
+    from app.celery_app import celery
+    fake = fakeredis.FakeStrictRedis()
+    monkeypatch.setattr(events_mod, "get_redis", lambda: fake)
+    revoked = {}
+    monkeypatch.setattr(celery.control, "revoke",
+                        lambda task_id, terminate=False: revoked.update(
+                            task_id=task_id, terminate=terminate))
+    _add_running_job_row("cxl2")
+    rundir = tmp_path / "drydock-cxl2-xyz"
+    rundir.mkdir()
+    (rundir / "ssh_key").write_text("secret")
+    fake.set(tasks_mod.TASK_KEY.format(jid="cxl2"), "task-123")
+    fake.set(tasks_mod.RUNDIR_KEY.format(jid="cxl2"), str(rundir))
+
+    assert client.post("/api/jobs/cxl2/cancel").status_code == 200
+    assert revoked == {"task_id": "task-123", "terminate": True}
+    assert not rundir.exists()  # temp key file cleaned up
+    assert client.get("/api/jobs/cxl2").json()["status"] == "cancelled"
+
+
+def test_retry_failed_nodes_creates_subset_job(client, monkeypatch):
+    def fake_partial(job_id, hosts, playbook_content, extra_vars, check_mode, emit, on_run_dir=None):
+        emit({"type": "job_started", "ts": 1.0})
+        for h in hosts:
+            if h["name"] == "bad":
+                emit({"type": "host_failed", "host": "bad", "task": "t",
+                      "msg": "boom", "ts": 1.1})
+            else:
+                emit({"type": "host_ok", "host": h["name"], "task": "t", "ts": 1.1})
+        emit({"type": "job_finished", "ts": 1.2})
+        return False
+
+    monkeypatch.setattr("app.tasks.run_playbook", fake_partial)
+    h1 = _add_host(client, name="good")
+    h2 = _add_host(client, name="bad")
+    pid = _add_playbook(client)
+    tid = _add_template(client, pid, [h1, h2])
+    jid = client.post("/api/jobs", json={"template_id": tid}).json()["job_id"]
+    job = _wait_done(client, jid)
+    assert job["status"] == "failed"
+
+    r = client.post(f"/api/jobs/{jid}/retry")
+    assert r.status_code == 200, r.text
+    new_id = r.json()["job_id"]
+    new_job = _wait_done(client, new_id)
+    assert new_job["host_ids"] == [h2]  # only the failed host
+    assert new_job["snapshot"]["retried_from"] == jid
+    assert new_job["snapshot"]["playbook_content"] == job["snapshot"]["playbook_content"]
+    assert new_job["snapshot"]["extra_vars"] == job["snapshot"]["extra_vars"]
+
+
+def test_retry_successful_job_returns_400(client, monkeypatch):
+    monkeypatch.setattr("app.tasks.run_playbook", _fake_runner_ok)
+    hid = _add_host(client)
+    jid = client.post("/api/jobs", json={"host_ids": [hid]}).json()["job_id"]
+    _wait_done(client, jid)
+    assert client.post(f"/api/jobs/{jid}/retry").status_code == 400
+
+
+def test_retry_without_failed_hosts_returns_400(client, monkeypatch):
+    # job failed but emitted no host_failed events (crashed early)
+    monkeypatch.setattr("app.tasks.run_playbook", lambda *a, **k: False)
+    hid = _add_host(client)
+    jid = client.post("/api/jobs", json={"host_ids": [hid]}).json()["job_id"]
+    _wait_done(client, jid)
+    assert client.post(f"/api/jobs/{jid}/retry").status_code == 400
+
+
+def test_reconcile_marks_orphaned_running_as_interrupted(client, monkeypatch):
+    import fakeredis
+    from app import events as events_mod
+    from app import main as main_mod
+    fake = fakeredis.FakeStrictRedis()
+    monkeypatch.setattr(events_mod, "get_redis", lambda: fake)
+    _add_running_job_row("orph1")
+    main_mod._reconcile_jobs()
+    job = client.get("/api/jobs/orph1").json()
+    assert job["status"] == "interrupted"
+    assert job["finished_at"] is not None
+    assert job["events"][-1]["type"] == "job_interrupted"
+
+
+def test_reconcile_keeps_queued_job_running(client, monkeypatch):
+    import fakeredis
+    from app import events as events_mod
+    from app import main as main_mod
+    from app import tasks as tasks_mod
+    fake = fakeredis.FakeStrictRedis()
+    monkeypatch.setattr(events_mod, "get_redis", lambda: fake)
+    # task key present (enqueued, worker hasn't picked it up yet) -> not orphaned
+    fake.set(tasks_mod.TASK_KEY.format(jid="q1"), "task-abc")
+    _add_running_job_row("q1")
+    main_mod._reconcile_jobs()
+    assert client.get("/api/jobs/q1").json()["status"] == "running"

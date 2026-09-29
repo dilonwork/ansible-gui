@@ -76,6 +76,8 @@ textarea { font-family: ui-monospace, monospace; font-size: 11px; }
 .btn.primary { background: #e6355f; border-color: #e6355f; color: #fff; font-weight: 600; }
 .btn.danger-ghost { background: none; border: none; color: var(--faint); padding: 4px 8px; }
 .btn.danger-ghost:hover { color: var(--red); background: none; }
+.btn.danger { border-color: rgba(248,81,73,.5); color: var(--red); }
+.btn.danger:hover { background: rgba(248,81,73,.12); }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
 .form-msg { font-size: 12px; margin-top: 8px; min-height: 18px; }
 
