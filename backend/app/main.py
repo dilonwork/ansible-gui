@@ -27,9 +27,17 @@ from . import events
 from .celery_app import celery
 from .db import init_db, session_scope
 from .crypto import encrypt_str
-from .models import Host, Job, Playbook, Template
+from .models import Host, Job, MaintenanceRun, Playbook, Template
 from .runner_service import syntax_check_playbook
 from .tasks import TASK_KEY, RUNDIR_KEY, _finish_job, run_job_task
+from .workflows import WORKFLOWS
+from .maintenance_tasks import (
+    TASK_KEY as MAINT_TASK_KEY,
+    RUNDIR_KEY as MAINT_RUNDIR_KEY,
+    _transition as _maint_transition,
+    maintenance_abort_cleanup,
+    run_maintenance_task,
+)
 
 log = logging.getLogger("drydock.main")
 
@@ -395,19 +403,209 @@ def retry_job(jid: str):
     return {"job_id": _launch_job(snapshot)}
 
 
+# ---------- maintenance runs (M5) ----------
+class MaintenanceIn(BaseModel):
+    name: str
+    workflow: str = "os-patch"
+    node_ids: list[str]
+    kubeconfig: str | None = None       # optional: enables k8s steps
+    params: dict = {}                   # kubelet_version, drain_timeout, ...
+    playbook_overrides: dict = {}       # testing seam: {step_name: content}
+
+
+def _maint_summary(r: MaintenanceRun) -> dict:
+    steps = r.steps or []
+    done = sum(1 for n in steps if n.get("state") == "done")
+    return {"id": r.id, "name": r.name, "workflow": r.workflow,
+            "node_ids": r.node_ids, "status": r.status,
+            "nodes_done": done, "nodes_total": len(steps),
+            "created_at": r.created_at, "finished_at": r.finished_at}
+
+
+def _maint_full(r: MaintenanceRun) -> dict:
+    return {"id": r.id, "name": r.name, "workflow": r.workflow,
+            "node_ids": r.node_ids, "status": r.status,
+            "steps": r.steps or [], "preflight": r.preflight or [],
+            "snapshot": r.snapshot or {}, "events": r.events or [],
+            "created_at": r.created_at, "finished_at": r.finished_at,
+            "has_k8s": bool(r.kubeconfig)}
+
+
+def _get_maint_or_404(rid: str) -> MaintenanceRun:
+    with session_scope() as s:
+        run = s.get(MaintenanceRun, rid)
+        if not run:
+            raise HTTPException(404, "no such maintenance run")
+        s.expunge(run)
+        return run
+
+
+def _enqueue_maintenance(rid: str) -> None:
+    result = run_maintenance_task.delay(rid)
+    r = events.get_redis()
+    if r is not None:
+        try:
+            r.set(MAINT_TASK_KEY.format(rid=rid), result.id, ex=86400)
+        except Exception:
+            pass
+
+
+@app.post("/api/maintenance")
+def create_maintenance(m: MaintenanceIn):
+    if m.workflow not in WORKFLOWS:
+        raise HTTPException(400, f"unknown workflow: {m.workflow}")
+    if not m.node_ids:
+        raise HTTPException(400, "node_ids is empty")
+    with session_scope() as s:
+        known = {h.id for h in s.query(Host).all()}
+        missing = [i for i in m.node_ids if i not in known]
+        if missing:
+            raise HTTPException(400, f"unknown hosts: {missing}")
+        rid = uuid.uuid4().hex[:8]
+        snapshot = {"workflow": m.workflow,
+                    "node_ids": list(m.node_ids),
+                    "params": dict(m.params or {}),
+                    "playbook_overrides": dict(m.playbook_overrides or {})}
+        s.add(MaintenanceRun(
+            id=rid, name=m.name, workflow=m.workflow,
+            node_ids=list(m.node_ids), status="running",
+            steps=[], preflight=[], snapshot=snapshot, events=[],
+            kubeconfig=encrypt_str(m.kubeconfig) if m.kubeconfig else None,
+            created_at=time.time(), finished_at=None))
+    events.ws_queues[rid] = []
+    _enqueue_maintenance(rid)
+    return {"run_id": rid}
+
+
+@app.get("/api/maintenance")
+def list_maintenance():
+    with session_scope() as s:
+        return [_maint_summary(r) for r in s.query(MaintenanceRun).all()]
+
+
+@app.get("/api/maintenance/{rid}")
+def get_maintenance(rid: str):
+    return _maint_full(_get_maint_or_404(rid))
+
+
+@app.post("/api/maintenance/{rid}/pause")
+def pause_maintenance(rid: str):
+    _get_maint_or_404(rid)
+    if not _maint_transition(rid, ("running",), "pausing"):
+        raise HTTPException(400, "run is not running")
+    return {"ok": True}
+
+
+@app.post("/api/maintenance/{rid}/resume")
+def resume_maintenance(rid: str):
+    _get_maint_or_404(rid)
+    if not _maint_transition(rid, ("paused", "pausing"), "running"):
+        raise HTTPException(400, "run is not paused")
+    _enqueue_maintenance(rid)
+    return {"ok": True}
+
+
+@app.post("/api/maintenance/{rid}/retry-node")
+def retry_maintenance_node(rid: str):
+    run = _get_maint_or_404(rid)
+    if run.status != "paused":
+        raise HTTPException(400, f"run is not paused (status={run.status})")
+    steps = [dict(n) for n in (run.steps or [])]
+    node = next((n for n in steps if n.get("state") == "failed"), None)
+    if not node:
+        raise HTTPException(400, "no failed node to retry")
+    step_names = [s for s in node.get("step_states", {})]
+    node["step_states"] = {s: "pending" for s in step_names}
+    node["state"] = "pending"
+    node["failed_step"] = None
+    with session_scope() as s:
+        s.get(MaintenanceRun, rid).steps = steps
+    events.emit_run_event(rid, {"type": "maint_node_retry",
+                                "node": node["node_name"],
+                                "ts": round(time.time(), 2)})
+    if not _maint_transition(rid, ("paused",), "running"):
+        raise HTTPException(400, "run is not paused")
+    _enqueue_maintenance(rid)
+    return {"ok": True}
+
+
+@app.post("/api/maintenance/{rid}/skip-node")
+def skip_maintenance_node(rid: str):
+    run = _get_maint_or_404(rid)
+    if run.status != "paused":
+        raise HTTPException(400, f"run is not paused (status={run.status})")
+    steps = [dict(n) for n in (run.steps or [])]
+    node = next((n for n in steps if n.get("state") == "failed"), None)
+    if not node:
+        raise HTTPException(400, "no failed node to skip")
+    node["state"] = "skipped"
+    with session_scope() as s:
+        s.get(MaintenanceRun, rid).steps = steps
+    events.emit_run_event(rid, {"type": "maint_node_skipped",
+                                "node": node["node_name"],
+                                "ts": round(time.time(), 2)})
+    if not _maint_transition(rid, ("paused",), "running"):
+        raise HTTPException(400, "run is not paused")
+    _enqueue_maintenance(rid)
+    return {"ok": True}
+
+
+@app.post("/api/maintenance/{rid}/abort")
+def abort_maintenance(rid: str):
+    run = _get_maint_or_404(rid)
+    if run.status not in ("running", "pausing", "paused"):
+        raise HTTPException(400, f"run is not active (status={run.status})")
+    r = events.get_redis()
+    if r is not None:
+        try:
+            raw = r.get(MAINT_TASK_KEY.format(rid=rid))
+            task_id = raw.decode() if isinstance(raw, bytes) else raw
+            if task_id:
+                celery.control.revoke(task_id, terminate=True)
+        except Exception as e:
+            log.warning("revoke failed for maintenance run %s: %s", rid, e)
+    # best-effort uncordon of nodes left cordoned (k8s workflows)
+    if run.kubeconfig:
+        maintenance_abort_cleanup.delay(rid)
+    if r is not None:
+        try:
+            raw = r.get(MAINT_RUNDIR_KEY.format(rid=rid))
+            rundir = raw.decode() if isinstance(raw, bytes) else raw
+            if rundir:
+                shutil.rmtree(rundir, ignore_errors=True)
+        except Exception:
+            pass
+    if not _maint_transition(rid, ("running", "pausing", "paused"), "aborted"):
+        raise HTTPException(400, "run already finished")
+    events.emit_run_event(rid, {"type": "maint_aborted",
+                                "ts": round(time.time(), 2)})
+    return {"ok": True}
+
+
 # ---------- websocket: live event stream ----------
 @app.websocket("/ws/jobs/{jid}")
 async def job_stream(ws: WebSocket, jid: str):
+    await _event_stream(ws, jid, Job, ("job_finished", "job_cancelled"))
+
+
+@app.websocket("/ws/maintenance/{rid}")
+async def maintenance_stream(ws: WebSocket, rid: str):
+    await _event_stream(ws, rid, MaintenanceRun,
+                        ("maint_run_done", "maint_preflight_failed"))
+
+
+async def _event_stream(ws: WebSocket, rid: str, model,
+                        terminal_types: tuple) -> None:
     with session_scope() as s:
-        job = s.get(Job, jid)
-        if not job:
+        obj = s.get(model, rid)
+        if not obj:
             await ws.close(code=4404)
             return
-        history = list(job.events or [])
-        running = job.status == "running"
+        history = list(obj.events or [])
+        running = obj.status in ("running", "pausing")
     await ws.accept()
     q: asyncio.Queue = asyncio.Queue()
-    events.ws_queues.setdefault(jid, []).append(q)
+    events.ws_queues.setdefault(rid, []).append(q)
     try:
         # replay history first so late joiners miss nothing
         for e in history:
@@ -418,14 +616,14 @@ async def job_stream(ws: WebSocket, jid: str):
         while True:
             e = await q.get()
             await ws.send_json(e)
-            if e.get("type") in ("job_finished", "job_cancelled"):
+            if e.get("type") in terminal_types:
                 await asyncio.sleep(0.2)
                 break
     except WebSocketDisconnect:
         pass
     finally:
-        if q in events.ws_queues.get(jid, []):
-            events.ws_queues[jid].remove(q)
+        if q in events.ws_queues.get(rid, []):
+            events.ws_queues[rid].remove(q)
         await ws.close()
 
 

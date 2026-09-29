@@ -58,6 +58,23 @@ late WebSocket joiners get the full replay from the database.
 - `POST /api/jobs/{id}/retry` → new job with the same frozen snapshot, targeting only failed hosts
 - `WS /ws/jobs/{id}` → live event stream (history replayed first for late joiners)
 
+## Node maintenance (M5)
+
+One-click rolling maintenance: `POST /api/maintenance`
+{name, workflow: os-patch|kubelet-upgrade, node_ids (in rolling order),
+ kubeconfig? (enables cordon/drain/uncordon + K8s preflight), params?, playbook_overrides?}.
+
+- Orchestrator: `drydock.run_maintenance` (app/maintenance_tasks.py) walks nodes
+  strictly serial=1; each step (cordon→drain→maintain→verify→uncordon) runs as
+  one ansible job. State persists after every step; completed nodes never re-run.
+- Preflight (ansible): ssh connectivity, disk space; with kubeconfig: control-plane
+  Ready, version skew + single-replica warnings. Hard failure blocks the run.
+- On node failure the batch pauses: `POST /api/maintenance/{id}/retry-node`
+  (restarts the node from its first step), `/skip-node`, `/abort`
+  (revokes + best-effort uncordon of stuck nodes), `/pause`, `/resume`.
+- `WS /ws/maintenance/{id}`: live run events (history replayed for late joiners).
+- Without kubeconfig, k8s steps are skipped: pure OS-level rolling workflow.
+
 ## Execution engine (Celery + Redis)
 
 - `app/celery_app.py`: broker + result backend = Redis (`REDIS_URL`, default `redis://localhost:6379/0`); `task_acks_late` so a dead worker redelivers instead of losing the job

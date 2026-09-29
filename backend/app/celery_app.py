@@ -27,6 +27,7 @@ celery.conf.update(
 if os.environ.get("CELERY_EAGER") == "1":
     celery.conf.task_always_eager = True
 
-# ensure the task is registered when a worker boots from this app module
-# (import at the end: tasks.py imports `celery` from here)
+# ensure the tasks are registered when a worker boots from this app module
+# (import at the end: tasks modules import `celery` from here)
 from . import tasks  # noqa: F401,E402
+from . import maintenance_tasks  # noqa: F401,E402

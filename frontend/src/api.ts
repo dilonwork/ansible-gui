@@ -102,9 +102,80 @@ export const api = {
   getJob: (id: string) => req<Job>(`/api/jobs/${id}`),
   cancelJob: (id: string) => req<{ ok: boolean }>(`/api/jobs/${id}/cancel`, { method: 'POST' }),
   retryJob: (id: string) => req<{ job_id: string }>(`/api/jobs/${id}/retry`, { method: 'POST' }),
+
+  listMaintenance: () => req<MaintSummary[]>('/api/maintenance'),
+  createMaintenance: (body: { name: string; workflow: string; node_ids: string[]; kubeconfig?: string; params?: Record<string, unknown> }) =>
+    req<{ run_id: string }>('/api/maintenance', { method: 'POST', body: JSON.stringify(body) }),
+  getMaintenance: (id: string) => req<MaintRun>(`/api/maintenance/${id}`),
+  pauseMaintenance: (id: string) => req<{ ok: boolean }>(`/api/maintenance/${id}/pause`, { method: 'POST' }),
+  resumeMaintenance: (id: string) => req<{ ok: boolean }>(`/api/maintenance/${id}/resume`, { method: 'POST' }),
+  retryMaintNode: (id: string) => req<{ ok: boolean }>(`/api/maintenance/${id}/retry-node`, { method: 'POST' }),
+  skipMaintNode: (id: string) => req<{ ok: boolean }>(`/api/maintenance/${id}/skip-node`, { method: 'POST' }),
+  abortMaintenance: (id: string) => req<{ ok: boolean }>(`/api/maintenance/${id}/abort`, { method: 'POST' }),
+}
+
+export function maintWsUrl(id: string): string {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+  return `${proto}://${location.host}/ws/maintenance/${id}`
 }
 
 export function jobWsUrl(id: string): string {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
   return `${proto}://${location.host}/ws/jobs/${id}`
+}
+
+export interface MaintNodeStep {
+  node_id: string
+  node_name: string
+  k8s_name: string
+  state: 'pending' | 'running' | 'done' | 'failed' | 'skipped'
+  attempts: number
+  step_states: Record<string, 'pending' | 'running' | 'done' | 'failed' | 'skipped'>
+  failed_step: string | null
+}
+
+export interface MaintCheck {
+  name: string
+  status: 'passed' | 'warning' | 'failed'
+  detail: string
+}
+
+export interface MaintEvent {
+  type: string
+  ts?: number
+  node?: string
+  step?: string
+  task?: string
+  host?: string
+  msg?: string
+  ok?: boolean
+  failed?: string[]
+  workflow?: string
+}
+
+export interface MaintRun {
+  id: string
+  name: string
+  workflow: 'os-patch' | 'kubelet-upgrade'
+  node_ids: string[]
+  status: 'running' | 'pausing' | 'paused' | 'failed' | 'completed' | 'aborted'
+  steps: MaintNodeStep[]
+  preflight: MaintCheck[]
+  snapshot: Record<string, unknown>
+  events: MaintEvent[]
+  created_at: number
+  finished_at: number | null
+  has_k8s: boolean
+}
+
+export interface MaintSummary {
+  id: string
+  name: string
+  workflow: string
+  node_ids: string[]
+  status: MaintRun['status']
+  nodes_done: number
+  nodes_total: number
+  created_at: number
+  finished_at: number | null
 }

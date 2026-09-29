@@ -22,6 +22,9 @@ def _write_key_file(path: str, private_key: str) -> None:
 
 
 def _build_inventory(hosts, key_path: str, known_hosts_path: str) -> str:
+    if not hosts:
+        # localhost steps (e.g. kubectl): no SSH involved
+        return "[targets]\nlocalhost ansible_connection=local\n"
     lines = ["[targets]"]
     for h in hosts:
         lines.append(
@@ -47,6 +50,11 @@ def _simplify(event: dict) -> dict | None:
     if etype == "playbook_on_task_start":
         return {"type": "task_start", "task": task}
     if etype == "runner_on_ok":
+        res = data.get("res", {}) or {}
+        msg = res.get("msg", "")
+        if isinstance(msg, str) and "WARNING:" in msg:
+            return {"type": "check_warning", "host": host, "task": task,
+                    "msg": msg[:500]}
         return {"type": "host_ok", "host": host, "task": task}
     if etype == "runner_on_failed":
         res = data.get("res", {}) or {}
@@ -63,29 +71,35 @@ def _simplify(event: dict) -> dict | None:
 
 def run_playbook(job_id: str, hosts: list[dict], playbook_content: str,
                  extra_vars: dict, check_mode: bool, emit,
-                 on_run_dir=None) -> bool:
+                 on_run_dir=None, env: dict | None = None) -> bool:
     """Runs in a background worker. emit(event_dict) is called live. Returns success.
 
     on_run_dir, when given, is called with the temp run dir path right after
     creation so the caller can clean it up even if this process is killed
     (e.g. job cancel terminates the worker).
+
+    hosts=[] runs the playbook on localhost (ansible_connection=local);
+    env adds environment variables to the ansible process (e.g. KUBECONFIG).
     """
     run_dir = tempfile.mkdtemp(prefix=f"drydock-{job_id}-")
     if on_run_dir is not None:
         on_run_dir(run_dir)
     try:
-        key_path = os.path.join(run_dir, "ssh_key")
-        known_hosts_path = os.path.join(run_dir, "known_hosts")
-        # Skeleton assumption: one key for the whole batch.
-        _write_key_file(key_path, hosts[0]["private_key"])
-        with open(known_hosts_path, "w") as f:
-            for h in hosts:
-                f.write(h["host_key"].strip() + "\n")
-
         inv_dir = os.path.join(run_dir, "inventory")
         os.makedirs(inv_dir, exist_ok=True)
+        if hosts:
+            key_path = os.path.join(run_dir, "ssh_key")
+            known_hosts_path = os.path.join(run_dir, "known_hosts")
+            # Skeleton assumption: one key for the whole batch.
+            _write_key_file(key_path, hosts[0]["private_key"])
+            with open(known_hosts_path, "w") as f:
+                for h in hosts:
+                    f.write(h["host_key"].strip() + "\n")
+            inventory = _build_inventory(hosts, key_path, known_hosts_path)
+        else:
+            inventory = _build_inventory([], "", "")
         with open(os.path.join(inv_dir, "hosts"), "w") as f:
-            f.write(_build_inventory(hosts, key_path, known_hosts_path))
+            f.write(inventory)
 
         project_dir = os.path.join(run_dir, "project")
         os.makedirs(project_dir, exist_ok=True)
@@ -107,6 +121,7 @@ def run_playbook(job_id: str, hosts: list[dict], playbook_content: str,
             cmdline="--check" if check_mode else None,
             event_handler=handler,
             quiet=True,
+            envvars=env or {},
         )
         return r.status == "successful" and r.rc == 0
     finally:

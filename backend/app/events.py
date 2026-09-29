@@ -71,15 +71,36 @@ def _push_local(job_id: str, event: dict) -> None:
 def emit_event(job_id: str, event: dict) -> None:
     from .db import session_scope
     from .models import Job
-    with session_scope() as s:
-        job = s.get(Job, job_id)
-        if job:
-            job.events = (job.events or []) + [event]
-    _push_local(job_id, event)
+
+    def persist(ev: dict) -> None:
+        with session_scope() as s:
+            job = s.get(Job, job_id)
+            if job:
+                job.events = (job.events or []) + [ev]
+
+    _dispatch(job_id, event, persist)
+
+
+def emit_run_event(run_id: str, event: dict) -> None:
+    from .db import session_scope
+    from .models import MaintenanceRun
+
+    def persist(ev: dict) -> None:
+        with session_scope() as s:
+            run = s.get(MaintenanceRun, run_id)
+            if run:
+                run.events = (run.events or []) + [ev]
+
+    _dispatch(run_id, event, persist)
+
+
+def _dispatch(channel_id: str, event: dict, persist) -> None:
+    persist(event)
+    _push_local(channel_id, event)
     r = get_redis()
     if r is not None:
         try:
-            r.publish(CHANNEL, json.dumps({"job_id": job_id, "event": event}))
+            r.publish(CHANNEL, json.dumps({"job_id": channel_id, "event": event}))
         except Exception as e:
             log.warning("redis publish failed: %s", e)
             drop_redis()
