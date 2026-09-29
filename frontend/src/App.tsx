@@ -7,6 +7,7 @@ import JobDetail from './pages/JobDetail'
 import Maintenance from './pages/Maintenance'
 import MaintenanceDetail from './pages/MaintenanceDetail'
 import Playbooks from './pages/Playbooks'
+import Schedules from './pages/Schedules'
 import Templates from './pages/Templates'
 
 export default function App() {
@@ -22,6 +23,7 @@ export default function App() {
           <Route path="/jobs/:id" element={<JobDetail />} />
           <Route path="/maintenance" element={<Maintenance />} />
           <Route path="/maintenance/:id" element={<MaintenanceDetail />} />
+          <Route path="/schedules" element={<Schedules />} />
         </Route>
       </Routes>
     </BrowserRouter>

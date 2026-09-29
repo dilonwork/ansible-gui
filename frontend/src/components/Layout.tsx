@@ -28,6 +28,9 @@ export default function Layout() {
           <NavLink to="/maintenance" className={({isActive}) => isActive ? 'active' : ''}>
             <span className="ico">🛠</span>Maintenance
           </NavLink>
+          <NavLink to="/schedules" className={({isActive}) => isActive ? 'active' : ''}>
+            <span className="ico">🕐</span>Schedules
+          </NavLink>
         </nav>
         <div className="nav-sec">SYSTEM</div>
         <nav className="nav">

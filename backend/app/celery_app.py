@@ -22,6 +22,12 @@ celery.conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
+    beat_schedule={
+        "tick-schedules": {
+            "task": "drydock.tick_schedules",
+            "schedule": 60.0,
+        },
+    },
 )
 
 if os.environ.get("CELERY_EAGER") == "1":

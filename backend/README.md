@@ -84,6 +84,16 @@ One-click rolling maintenance: `POST /api/maintenance`
 - Cancel: `celery.control.revoke(terminate=True)` + temp-dir cleanup (the 600 SSH key file) + `cancelled` status
 - Local dev: `./scripts/start-services.sh` (Redis via docker compose, or native `redis-server`); tests set `CELERY_EAGER=1` and run tasks inline, no Redis needed
 
+## Schedules (cron)
+
+- `POST /api/schedules` {name, template_id, cron, timezone="UTC", enabled}: cron validated + human preview (`POST /api/schedules/preview` → "Every 15 minutes" + next 3 runs)
+- A Celery Beat process (`celery -A app.celery_app beat`, 60s tick) fires due schedules via `drydock.tick_schedules`; `docker-compose.yml` includes a `beat` service
+- `next_run_at` is persisted: the cadence survives backend restarts
+- Missed occurrences while the backend was down are counted (`missed_count`, `recent_missed`) — at most one catch-up run fires per tick, then the cadence resumes
+- No overlapping runs: a schedule skips its tick while a previous run is still going (`skipped_overlap`)
+- No duplicate enabled schedules for the same template + cron + timezone
+- `POST /api/schedules/{id}/run-now` launches immediately without shifting the cadence; disabling clears `next_run_at`; scheduled jobs carry `schedule_id`
+
 ## Security design (done)
 
 - SSH private keys are written to a 600 temp file only for the duration of a run, then deleted

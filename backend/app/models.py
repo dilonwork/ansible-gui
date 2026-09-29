@@ -46,6 +46,7 @@ class Job(Base):
     status = Column(String(16), default="running")
     snapshot = Column(JSON, default=dict)
     events = Column(JSON, default=list)
+    schedule_id = Column(String(16), nullable=True)  # set for scheduled runs
     created_at = Column(Float)
     finished_at = Column(Float, nullable=True)
 
@@ -72,3 +73,27 @@ class MaintenanceRun(Base):
     events = Column(JSON, default=list)
     created_at = Column(Float)
     finished_at = Column(Float, nullable=True)
+
+
+class Schedule(Base):
+    """A cron schedule that launches a job template on a recurring basis.
+
+    next_run_at is persisted so the cadence survives backend restarts.
+    Missed occurrences (backend down) are counted in missed_count instead of
+    being silently skipped; at most one catch-up run fires per tick.
+    """
+    __tablename__ = "schedules"
+    id = Column(String(16), primary_key=True)
+    name = Column(String(128), nullable=False)
+    template_id = Column(String(16), nullable=False)
+    cron = Column(String(64), nullable=False)          # 5-field cron
+    timezone = Column(String(64), default="UTC")
+    enabled = Column(Boolean, default=True)
+    next_run_at = Column(Float, nullable=True)         # UTC epoch
+    last_run_at = Column(Float, nullable=True)
+    last_job_id = Column(String(16), nullable=True)
+    last_status = Column(String(32), nullable=True)
+    missed_count = Column(Integer, default=0)
+    recent_missed = Column(JSON, default=list)         # last missed UTC epochs
+    skipped_overlap = Column(Integer, default=0)
+    created_at = Column(Float)

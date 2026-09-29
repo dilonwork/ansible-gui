@@ -27,8 +27,11 @@ from . import events
 from .celery_app import celery
 from .db import init_db, session_scope
 from .crypto import encrypt_str
-from .models import Host, Job, MaintenanceRun, Playbook, Template
+from .launch import PING_YML, launch_job, template_snapshot
+from .models import Host, Job, MaintenanceRun, Playbook, Schedule, Template
 from .runner_service import syntax_check_playbook
+from .schedules import (count_missed, describe_cron, next_occurrence,
+                        preview_next, validate_cron, validate_timezone)
 from .tasks import TASK_KEY, RUNDIR_KEY, _finish_job, run_job_task
 from .workflows import WORKFLOWS
 from .maintenance_tasks import (
@@ -72,15 +75,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Drydock API", lifespan=lifespan)
 
-PING_YML = """\
-- name: connectivity check
-  hosts: all
-  gather_facts: false
-  tasks:
-    - name: ping via ssh
-      ansible.builtin.ping:
-"""
-
 
 # ---------- models ----------
 class HostIn(BaseModel):
@@ -122,24 +116,6 @@ def keyscan(address: str, port: int) -> str:
     if not lines:
         raise RuntimeError(f"keyscan failed: {p.stderr.strip()[:200]}")
     return "\n".join(lines)
-
-
-def _launch_job(snapshot: dict) -> str:
-    """Persist a job row and enqueue it. Returns the job id."""
-    jid = uuid.uuid4().hex[:8]
-    with session_scope() as s:
-        s.add(Job(id=jid, host_ids=snapshot["host_ids"], status="running",
-                  snapshot=snapshot, events=[], created_at=time.time(),
-                  finished_at=None))
-    events.ws_queues[jid] = []
-    result = run_job_task.delay(jid)
-    r = events.get_redis()
-    if r is not None:
-        try:
-            r.set(TASK_KEY.format(jid=jid), result.id, ex=86400)
-        except Exception:
-            pass
-    return jid
 
 
 def _host_public(h: Host) -> dict:
@@ -293,21 +269,11 @@ def create_job(j: JobIn):
 
     with session_scope() as s:
         if j.template_id:
-            t = s.get(Template, j.template_id)
-            if not t:
-                raise HTTPException(404, "no such template")
-            pb = s.get(Playbook, t.playbook_id)
-            if not pb:
-                raise HTTPException(400, "template references a deleted playbook")
-            snapshot = {
-                "kind": "template",
-                "template_id": t.id, "template_name": t.name,
-                "playbook_id": pb.id, "playbook_name": pb.name,
-                "playbook_content": pb.content,  # frozen at launch time
-                "host_ids": list(t.host_ids or []),
-                "extra_vars": {**(t.extra_vars or {}), **(j.extra_vars or {})},
-                "check_mode": j.check_mode if j.check_mode is not None else t.check_mode,
-            }
+            try:
+                snapshot = template_snapshot(j.template_id, j.extra_vars,
+                                             j.check_mode)
+            except ValueError as e:
+                raise HTTPException(400, str(e))
         else:
             known = {h.id for h in s.query(Host).all()}
             missing = [i for i in j.host_ids if i not in known]
@@ -321,7 +287,7 @@ def create_job(j: JobIn):
                 "extra_vars": j.extra_vars or {},
                 "check_mode": False,
             }
-    return {"job_id": _launch_job(snapshot)}
+    return {"job_id": launch_job(snapshot)}
 
 
 @app.get("/api/jobs")
@@ -400,7 +366,7 @@ def retry_job(jid: str):
         raise HTTPException(400, "no failed hosts to retry")
     snapshot["host_ids"] = failed_ids
     snapshot["retried_from"] = jid
-    return {"job_id": _launch_job(snapshot)}
+    return {"job_id": launch_job(snapshot)}
 
 
 # ---------- maintenance runs (M5) ----------
@@ -580,6 +546,168 @@ def abort_maintenance(rid: str):
     events.emit_run_event(rid, {"type": "maint_aborted",
                                 "ts": round(time.time(), 2)})
     return {"ok": True}
+
+
+# ---------- schedules ----------
+class ScheduleIn(BaseModel):
+    name: str
+    template_id: str
+    cron: str
+    timezone: str = "UTC"
+    enabled: bool = True
+
+
+class SchedulePreviewIn(BaseModel):
+    cron: str
+    timezone: str = "UTC"
+
+
+def _check_cron_tz(cron: str, timezone: str) -> None:
+    try:
+        validate_cron(cron)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    try:
+        validate_timezone(timezone)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+def _sched_public(s: Schedule, template_name: str) -> dict:
+    return {"id": s.id, "name": s.name, "template_id": s.template_id,
+            "template_name": template_name, "cron": s.cron,
+            "timezone": s.timezone, "enabled": s.enabled,
+            "human": describe_cron(s.cron),
+            "next_run_at": s.next_run_at, "last_run_at": s.last_run_at,
+            "last_job_id": s.last_job_id, "last_status": s.last_status,
+            "missed_count": s.missed_count or 0,
+            "recent_missed": s.recent_missed or [],
+            "skipped_overlap": s.skipped_overlap or 0,
+            "created_at": s.created_at}
+
+
+def _template_names(s) -> dict:
+    return {t.id: t.name for t in s.query(Template).all()}
+
+
+def _no_duplicate(s, template_id: str, cron: str, timezone: str,
+                  exclude: str | None = None) -> None:
+    q = s.query(Schedule).filter(
+        Schedule.enabled == True,  # noqa: E712
+        Schedule.template_id == template_id,
+        Schedule.cron == cron, Schedule.timezone == timezone)
+    if exclude:
+        q = q.filter(Schedule.id != exclude)
+    if q.count():
+        raise HTTPException(
+            400, "an enabled schedule with the same template + cron + "
+                 "timezone already exists")
+
+
+@app.post("/api/schedules/preview")
+def preview_schedule(p: SchedulePreviewIn):
+    _check_cron_tz(p.cron, p.timezone)
+    now = time.time()
+    return {"human": describe_cron(p.cron),
+            "next_runs": preview_next(p.cron, p.timezone, now)}
+
+
+@app.post("/api/schedules")
+def create_schedule(sch: ScheduleIn):
+    _check_cron_tz(sch.cron, sch.timezone)
+    with session_scope() as s:
+        if not s.get(Template, sch.template_id):
+            raise HTTPException(404, "no such template")
+        if sch.enabled:
+            _no_duplicate(s, sch.template_id, sch.cron, sch.timezone)
+        sid = uuid.uuid4().hex[:8]
+        now = time.time()
+        s.add(Schedule(
+            id=sid, name=sch.name, template_id=sch.template_id,
+            cron=sch.cron, timezone=sch.timezone, enabled=sch.enabled,
+            next_run_at=next_occurrence(sch.cron, sch.timezone, now)
+            if sch.enabled else None,
+            created_at=now))
+    return {"schedule_id": sid}
+
+
+@app.get("/api/schedules")
+def list_schedules():
+    with session_scope() as s:
+        names = _template_names(s)
+        return [_sched_public(r, names.get(r.template_id, "(deleted)"))
+                for r in s.query(Schedule).all()]
+
+
+@app.get("/api/schedules/{sid}")
+def get_schedule(sid: str):
+    with session_scope() as s:
+        r = s.get(Schedule, sid)
+        if not r:
+            raise HTTPException(404, "no such schedule")
+        out = _sched_public(r, _template_names(s).get(r.template_id,
+                                                     "(deleted)"))
+        jobs = (s.query(Job).filter(Job.schedule_id == sid)
+                .order_by(Job.created_at.desc()).limit(5).all())
+        out["recent_jobs"] = [
+            {"id": j.id, "status": j.status, "created_at": j.created_at,
+             "finished_at": j.finished_at} for j in jobs]
+        return out
+
+
+@app.put("/api/schedules/{sid}")
+def update_schedule(sid: str, sch: ScheduleIn):
+    _check_cron_tz(sch.cron, sch.timezone)
+    with session_scope() as s:
+        r = s.get(Schedule, sid)
+        if not r:
+            raise HTTPException(404, "no such schedule")
+        if not s.get(Template, sch.template_id):
+            raise HTTPException(404, "no such template")
+        if sch.enabled:
+            _no_duplicate(s, sch.template_id, sch.cron, sch.timezone,
+                          exclude=sid)
+        cadence_changed = (sch.cron != r.cron or sch.timezone != r.timezone
+                           or (sch.enabled and not r.enabled))
+        r.name = sch.name
+        r.template_id = sch.template_id
+        r.cron = sch.cron
+        r.timezone = sch.timezone
+        r.enabled = sch.enabled
+        if not sch.enabled:
+            r.next_run_at = None
+        elif cadence_changed:
+            r.next_run_at = next_occurrence(sch.cron, sch.timezone, time.time())
+    return {"ok": True}
+
+
+@app.delete("/api/schedules/{sid}")
+def delete_schedule(sid: str):
+    with session_scope() as s:
+        r = s.get(Schedule, sid)
+        if not r:
+            raise HTTPException(404, "no such schedule")
+        s.delete(r)
+    return {"ok": True}
+
+
+@app.post("/api/schedules/{sid}/run-now")
+def run_schedule_now(sid: str):
+    with session_scope() as s:
+        r = s.get(Schedule, sid)
+        if not r:
+            raise HTTPException(404, "no such schedule")
+        try:
+            snapshot = template_snapshot(r.template_id)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        snapshot["schedule_id"] = sid
+        snapshot["schedule_name"] = r.name
+        jid = launch_job(snapshot, schedule_id=sid)
+        r.last_run_at = time.time()
+        r.last_job_id = jid
+        r.last_status = "launched (manual)"
+    return {"job_id": jid}
 
 
 # ---------- websocket: live event stream ----------

@@ -98,3 +98,96 @@ def run_job_task(self, job_id: str) -> None:
                           RUNDIR_KEY.format(jid=job_id))
             except Exception:
                 pass
+
+
+@celery.task(bind=True, name="drydock.tick_schedules", max_retries=0)
+def tick_schedules(self) -> None:
+    """Beat tick (every 60s): fire due schedules.
+
+    Lazy-imports launch helpers to avoid a circular import at module load.
+    """
+    from .launch import launch_job, template_snapshot
+    from .models import Schedule
+    from .schedules import count_missed, next_occurrence
+
+    now = time.time()
+    with session_scope() as s:
+        due_ids = [r.id for r in s.query(Schedule).filter(
+            Schedule.enabled == True,  # noqa: E712
+            Schedule.next_run_at.isnot(None),
+            Schedule.next_run_at <= now).all()]
+    for sid in due_ids:
+        try:
+            _fire_schedule(sid, now, launch_job, template_snapshot,
+                           count_missed, next_occurrence)
+        except Exception:
+            log.exception("schedule %s tick failed", sid)
+
+
+def _fire_schedule(sid: str, now: float, launch_job, template_snapshot,
+                   count_missed, next_occurrence) -> None:
+    from .models import Schedule
+    # Phase 1: read-only — decide what to do, then close the session.
+    # (Never hold a dirty session across nested writes: SQLite would deadlock
+    #  on autoflush, and short transactions are correct anyway.)
+    with session_scope() as s:
+        r = s.get(Schedule, sid)
+        if not r or not r.enabled:
+            return
+        if r.next_run_at is None or r.next_run_at > now:
+            return
+        state = {"cron": r.cron, "timezone": r.timezone,
+                 "template_id": r.template_id, "name": r.name,
+                 "next_run_at": r.next_run_at,
+                 "missed_count": r.missed_count or 0,
+                 "recent_missed": r.recent_missed or [],
+                 "skipped_overlap": r.skipped_overlap or 0}
+        overlap = s.query(Job).filter(
+            Job.schedule_id == sid, Job.status == "running").count() > 0
+
+    missed, nxt = count_missed(state["cron"], state["timezone"],
+                               state["next_run_at"], now)
+    truly_missed = missed[:-1]  # the latest due occurrence fires now
+    if truly_missed:
+        state["missed_count"] += len(truly_missed)
+        state["recent_missed"] = (state["recent_missed"] +
+                                  truly_missed[-20:])[-20:]
+
+    # Phase 2: fire (its own sessions).
+    jid = None
+    status = None
+    if overlap:
+        state["skipped_overlap"] += 1
+        status = "skipped (overlap)"
+        state["next_run_at"] = next_occurrence(state["cron"],
+                                               state["timezone"], now)
+    else:
+        try:
+            snapshot = template_snapshot(state["template_id"])
+        except ValueError as e:
+            status = f"template missing: {e}"
+            state["enabled"] = False
+            state["next_run_at"] = None
+        else:
+            snapshot["schedule_id"] = sid
+            snapshot["schedule_name"] = state["name"]
+            jid = launch_job(snapshot, schedule_id=sid)
+            status = "launched"
+            state["next_run_at"] = next_occurrence(state["cron"],
+                                                   state["timezone"], now)
+
+    # Phase 3: persist the outcome in a fresh short transaction.
+    with session_scope() as s:
+        r = s.get(Schedule, sid)
+        if not r:
+            return
+        r.missed_count = state["missed_count"]
+        r.recent_missed = state["recent_missed"]
+        r.skipped_overlap = state["skipped_overlap"]
+        r.next_run_at = state["next_run_at"]
+        r.last_status = status
+        if "enabled" in state:
+            r.enabled = state["enabled"]
+        if jid:
+            r.last_run_at = now
+            r.last_job_id = jid

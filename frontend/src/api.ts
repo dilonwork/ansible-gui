@@ -112,6 +112,40 @@ export const api = {
   retryMaintNode: (id: string) => req<{ ok: boolean }>(`/api/maintenance/${id}/retry-node`, { method: 'POST' }),
   skipMaintNode: (id: string) => req<{ ok: boolean }>(`/api/maintenance/${id}/skip-node`, { method: 'POST' }),
   abortMaintenance: (id: string) => req<{ ok: boolean }>(`/api/maintenance/${id}/abort`, { method: 'POST' }),
+
+  previewSchedule: (body: { cron: string; timezone?: string }) =>
+    req<{ human: string; next_runs: number[] }>('/api/schedules/preview', { method: 'POST', body: JSON.stringify(body) }),
+  listSchedules: () => req<ScheduleItem[]>('/api/schedules'),
+  getSchedule: (id: string) => req<ScheduleDetail>('/api/schedules/' + id),
+  createSchedule: (body: { name: string; template_id: string; cron: string; timezone?: string; enabled?: boolean }) =>
+    req<{ schedule_id: string }>('/api/schedules', { method: 'POST', body: JSON.stringify(body) }),
+  updateSchedule: (id: string, body: { name: string; template_id: string; cron: string; timezone?: string; enabled?: boolean }) =>
+    req<{ ok: boolean }>('/api/schedules/' + id, { method: 'PUT', body: JSON.stringify(body) }),
+  deleteSchedule: (id: string) => req<{ ok: boolean }>('/api/schedules/' + id, { method: 'DELETE' }),
+  runScheduleNow: (id: string) => req<{ job_id: string }>('/api/schedules/' + id + '/run-now', { method: 'POST' }),
+}
+
+export interface ScheduleItem {
+  id: string
+  name: string
+  template_id: string
+  template_name: string
+  cron: string
+  timezone: string
+  enabled: boolean
+  human: string
+  next_run_at: number | null
+  last_run_at: number | null
+  last_job_id: string | null
+  last_status: string | null
+  missed_count: number
+  recent_missed: number[]
+  skipped_overlap: number
+  created_at: number
+}
+
+export interface ScheduleDetail extends ScheduleItem {
+  recent_jobs: { id: string; status: string; created_at: number; finished_at: number | null }[]
 }
 
 export function maintWsUrl(id: string): string {
