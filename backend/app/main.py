@@ -26,13 +26,15 @@ from pydantic import BaseModel
 from . import events
 from .celery_app import celery
 from .db import init_db, session_scope
-from .crypto import encrypt_str
+from .crypto import decrypt_str, encrypt_str
 from .launch import PING_YML, launch_job, template_snapshot
-from .models import Host, Job, MaintenanceRun, NotificationChannel, Playbook, Schedule, Template
+from .models import (Host, Job, MaintenanceRun, NotificationChannel, Playbook,
+                     Schedule, Template, Cluster)
 from .runner_service import syntax_check_playbook
 from .schedules import (count_missed, describe_cron, next_occurrence,
                         preview_next, validate_cron, validate_timezone)
 from .tasks import TASK_KEY, RUNDIR_KEY, _finish_job, run_job_task
+from . import k8s as k8s_mod
 from .workflows import WORKFLOWS
 from .maintenance_tasks import (
     TASK_KEY as MAINT_TASK_KEY,
@@ -782,6 +784,115 @@ def test_channel(cid: str):
         raise HTTPException(400, f"webhook returned HTTP {e.code}")
     except Exception as e:
         raise HTTPException(400, f"webhook unreachable: {e}")
+
+
+# ---------- clusters (M4) ----------
+class ClusterIn(BaseModel):
+    name: str
+    kubeconfig: str
+
+
+def _cluster_public(c: Cluster) -> dict:
+    return {"id": c.id, "name": c.name, "server": c.server,
+            "k8s_version": c.k8s_version, "status": c.status,
+            "last_error": c.last_error, "last_sync_at": c.last_sync_at,
+            "created_at": c.created_at}
+
+
+@app.post("/api/clusters")
+def add_cluster(c: ClusterIn):
+    if not c.kubeconfig.strip():
+        raise HTTPException(400, "kubeconfig is empty")
+    try:
+        info = k8s_mod.parse_kubeconfig(c.kubeconfig)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    result = k8s_mod.test_connection(c.kubeconfig)
+    if not result["ok"]:
+        raise HTTPException(400, result["error"])
+    with session_scope() as s:
+        cid = uuid.uuid4().hex[:8]
+        now = time.time()
+        s.add(Cluster(id=cid, name=c.name,
+                      kubeconfig=encrypt_str(c.kubeconfig),
+                      server=result["server"],
+                      k8s_version=result.get("k8s_version"),
+                      status="ok", last_error=None,
+                      last_sync_at=now, created_at=now))
+    return {"id": cid, "server": result["server"],
+            "k8s_version": result.get("k8s_version")}
+
+
+@app.get("/api/clusters")
+def list_clusters():
+    with session_scope() as s:
+        return [_cluster_public(c) for c in s.query(Cluster).all()]
+
+
+def _get_cluster_or_404(s, cid: str) -> Cluster:
+    c = s.get(Cluster, cid)
+    if not c:
+        raise HTTPException(404, "no such cluster")
+    return c
+
+
+@app.get("/api/clusters/{cid}")
+def get_cluster(cid: str):
+    with session_scope() as s:
+        return _cluster_public(_get_cluster_or_404(s, cid))
+
+
+@app.delete("/api/clusters/{cid}")
+def delete_cluster(cid: str):
+    with session_scope() as s:
+        c = _get_cluster_or_404(s, cid)
+        s.delete(c)
+    return {"ok": True}
+
+
+@app.post("/api/clusters/{cid}/test")
+def test_cluster(cid: str):
+    """Re-run the connectivity check; updates stored status."""
+    with session_scope() as s:
+        c = _get_cluster_or_404(s, cid)
+        result = k8s_mod.test_connection(decrypt_str(c.kubeconfig))
+        c.status = "ok" if result["ok"] else "error"
+        c.last_error = None if result["ok"] else result["error"]
+        if result["ok"]:
+            c.k8s_version = result.get("k8s_version") or c.k8s_version
+            c.last_sync_at = time.time()
+        return result
+
+
+def _live_or_stale(cid: str, fetch):
+    """Run fetch(kubeconfig); on failure mark the cluster and report stale
+    instead of silently serving old numbers (4.2 acceptance criterion)."""
+    with session_scope() as s:
+        c = _get_cluster_or_404(s, cid)
+        kubeconfig = decrypt_str(c.kubeconfig)
+        try:
+            data = fetch(kubeconfig)
+        except Exception as e:
+            err = k8s_mod.categorize_error(e)
+            c.status = "error"
+            c.last_error = err
+            return {"stale": True, "error": err,
+                    "last_sync_at": c.last_sync_at}
+        c.status = "ok"
+        c.last_error = None
+        c.last_sync_at = time.time()
+        data["stale"] = False
+        return data
+
+
+@app.get("/api/clusters/{cid}/overview")
+def cluster_overview(cid: str):
+    return _live_or_stale(cid, k8s_mod.get_overview)
+
+
+@app.get("/api/clusters/{cid}/nodes")
+def cluster_nodes(cid: str):
+    return _live_or_stale(cid, lambda kc: {"nodes": k8s_mod.list_nodes(kc)})
 
 
 # ---------- websocket: live event stream ----------

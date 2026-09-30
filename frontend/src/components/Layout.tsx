@@ -34,6 +34,9 @@ export default function Layout() {
           <NavLink to="/notifications" className={({isActive}) => isActive ? 'active' : ''}>
             <span className="ico">🔔</span>Notifications
           </NavLink>
+          <NavLink to="/clusters" className={({isActive}) => isActive ? 'active' : ''}>
+            <span className="ico">☸</span>Clusters
+          </NavLink>
         </nav>
         <div className="nav-sec">SYSTEM</div>
         <nav className="nav">

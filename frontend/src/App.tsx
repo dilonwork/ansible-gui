@@ -4,6 +4,7 @@ import Dashboard from './pages/Dashboard'
 import Hosts from './pages/Hosts'
 import Jobs from './pages/Jobs'
 import JobDetail from './pages/JobDetail'
+import Clusters from './pages/Clusters'
 import Maintenance from './pages/Maintenance'
 import MaintenanceDetail from './pages/MaintenanceDetail'
 import Notifications from './pages/Notifications'
@@ -26,6 +27,7 @@ export default function App() {
           <Route path="/maintenance/:id" element={<MaintenanceDetail />} />
           <Route path="/schedules" element={<Schedules />} />
           <Route path="/notifications" element={<Notifications />} />
+          <Route path="/clusters" element={<Clusters />} />
         </Route>
       </Routes>
     </BrowserRouter>

@@ -101,6 +101,14 @@ One-click rolling maintenance: `POST /api/maintenance`
 - Payload: `event, job_id, status, template_name, hosts_total, hosts_succeeded, failed_hosts, duration_s, link`
 - `drydock.send_notification` (in `app/tasks.py`, autoretry x3) fires from `_finish_job`; `POST /api/notification-channels/{id}/test` verifies a channel
 
+## Kubernetes clusters (M4, v1)
+
+- Onboarding: `POST /api/clusters` {name, kubeconfig} — parses the kubeconfig, hits the API once, and stores it Fernet-encrypted (never returned by the API). Failures are categorized: certificate expired / insufficient RBAC (403) / network unreachable.
+- `GET /api/clusters/{id}/overview` — version, nodes Ready x/y, pod phase counts, top abnormal pods (CrashLoopBackOff / Pending / ImagePullBackOff detected via waiting reasons too). On API failure returns `stale: true` instead of old numbers.
+- `GET /api/clusters/{id}/nodes` — name, roles (from labels), Ready, cordoned, kubelet/CRI versions, OS image, cpu/mem.
+- Detail auto-refreshes every 30s in the UI.
+- Validated against a fake K8s API serving payloads built from the official `kubernetes` client models (tests/fake_k8s.py); real-cluster validation pending.
+
 ## Security design (done)
 
 - SSH private keys are written to a 600 temp file only for the duration of a run, then deleted

@@ -110,3 +110,20 @@ class NotificationChannel(Base):
     config = Column(JSON, default=dict)  # webhook: {url, headers}
     enabled = Column(Boolean, default=True)
     created_at = Column(Float)
+
+
+class Cluster(Base):
+    """A Kubernetes cluster onboarded via kubeconfig (M4.1).
+
+    The kubeconfig is Fernet-encrypted at rest and never returned by the API.
+    """
+    __tablename__ = "clusters"
+    id = Column(String(16), primary_key=True)
+    name = Column(String(128), nullable=False)
+    kubeconfig = Column(Text, nullable=False)  # encrypted
+    server = Column(String(256), nullable=True)
+    k8s_version = Column(String(32), nullable=True)
+    status = Column(String(16), default="unknown")  # ok | error | unknown
+    last_error = Column(Text, nullable=True)
+    last_sync_at = Column(Float, nullable=True)
+    created_at = Column(Float)

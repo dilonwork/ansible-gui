@@ -130,6 +130,50 @@ export const api = {
     req<{ id: string }>('/api/notification-channels', { method: 'POST', body: JSON.stringify(data) }),
   deleteChannel: (id: string) => req<{ ok: boolean }>('/api/notification-channels/' + id, { method: 'DELETE' }),
   testChannel: (id: string) => req<{ ok: boolean; status: number }>('/api/notification-channels/' + id + '/test', { method: 'POST' }),
+
+  listClusters: () => req<ClusterItem[]>('/api/clusters'),
+  addCluster: (data: { name: string; kubeconfig: string }) =>
+    req<{ id: string; server: string; k8s_version: string }>('/api/clusters', { method: 'POST', body: JSON.stringify(data) }),
+  deleteCluster: (id: string) => req<{ ok: boolean }>('/api/clusters/' + id, { method: 'DELETE' }),
+  testCluster: (id: string) => req<{ ok: boolean; error?: string; k8s_version?: string; detail?: string }>('/api/clusters/' + id + '/test', { method: 'POST' }),
+  clusterOverview: (id: string) => req<ClusterOverview>('/api/clusters/' + id + '/overview'),
+  clusterNodes: (id: string) => req<{ nodes: ClusterNode[]; stale: boolean; error?: string }>('/api/clusters/' + id + '/nodes'),
+}
+
+export interface ClusterItem {
+  id: string
+  name: string
+  server: string
+  k8s_version: string | null
+  status: 'ok' | 'error' | 'unknown'
+  last_error: string | null
+  last_sync_at: number | null
+  created_at: number
+}
+
+export interface ClusterNode {
+  name: string
+  roles: string[]
+  ready: boolean
+  unschedulable: boolean
+  kubelet_version: string
+  cri: string
+  os_image: string
+  arch: string
+  cpu: string
+  memory: string
+}
+
+export interface ClusterOverview {
+  stale: boolean
+  error?: string
+  version?: string
+  nodes_total?: number
+  nodes_ready?: number
+  pods_total?: number
+  pods_by_phase?: Record<string, number>
+  abnormal_pods?: { namespace: string; name: string; phase: string; reason: string; restarts: number }[]
+  last_sync_at?: number | null
 }
 
 export interface NotifyChannel {

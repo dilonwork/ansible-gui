@@ -9,3 +9,4 @@ celery>=5.4,<6
 redis>=5.0
 croniter>=2.0
 cron-descriptor>=1.4
+kubernetes>=28.0
