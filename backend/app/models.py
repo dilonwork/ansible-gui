@@ -36,6 +36,8 @@ class Template(Base):
     host_ids = Column(JSON, default=list)
     extra_vars = Column(JSON, default=dict)
     check_mode = Column(Boolean, default=False)
+    notification_policy = Column(String(16), default="failure_only")
+    # always | failure_only | never  (M8.1)
     created_at = Column(Float)
 
 
@@ -96,4 +98,15 @@ class Schedule(Base):
     missed_count = Column(Integer, default=0)
     recent_missed = Column(JSON, default=list)         # last missed UTC epochs
     skipped_overlap = Column(Integer, default=0)
+    created_at = Column(Float)
+
+
+class NotificationChannel(Base):
+    """Outbound notification channel (M8.1). v1: webhook only."""
+    __tablename__ = "notification_channels"
+    id = Column(String(16), primary_key=True)
+    name = Column(String(128), nullable=False)
+    type = Column(String(16), default="webhook")  # webhook | line | slack (later)
+    config = Column(JSON, default=dict)  # webhook: {url, headers}
+    enabled = Column(Boolean, default=True)
     created_at = Column(Float)

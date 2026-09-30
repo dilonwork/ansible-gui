@@ -21,6 +21,7 @@ export interface JobTemplate {
   host_ids: string[]
   extra_vars: Record<string, unknown>
   check_mode: boolean
+  notification_policy: 'always' | 'failure_only' | 'never'
   created_at: number
 }
 
@@ -92,7 +93,7 @@ export const api = {
     req<{ ok: boolean; output: string }>(`/api/playbooks/${id}/syntax-check`, { method: 'POST' }),
 
   listTemplates: () => req<JobTemplate[]>('/api/templates'),
-  addTemplate: (data: { name: string; playbook_id: string; host_ids: string[]; extra_vars: Record<string, unknown>; check_mode: boolean }) =>
+  addTemplate: (data: { name: string; playbook_id: string; host_ids: string[]; extra_vars: Record<string, unknown>; check_mode: boolean; notification_policy?: string }) =>
     req<{ id: string }>('/api/templates', { method: 'POST', body: JSON.stringify(data) }),
   delTemplate: (id: string) => req<{ ok: boolean }>(`/api/templates/${id}`, { method: 'DELETE' }),
 
@@ -123,6 +124,21 @@ export const api = {
     req<{ ok: boolean }>('/api/schedules/' + id, { method: 'PUT', body: JSON.stringify(body) }),
   deleteSchedule: (id: string) => req<{ ok: boolean }>('/api/schedules/' + id, { method: 'DELETE' }),
   runScheduleNow: (id: string) => req<{ job_id: string }>('/api/schedules/' + id + '/run-now', { method: 'POST' }),
+
+  listChannels: () => req<NotifyChannel[]>('/api/notification-channels'),
+  addChannel: (data: { name: string; type?: string; config: Record<string, unknown>; enabled?: boolean }) =>
+    req<{ id: string }>('/api/notification-channels', { method: 'POST', body: JSON.stringify(data) }),
+  deleteChannel: (id: string) => req<{ ok: boolean }>('/api/notification-channels/' + id, { method: 'DELETE' }),
+  testChannel: (id: string) => req<{ ok: boolean; status: number }>('/api/notification-channels/' + id + '/test', { method: 'POST' }),
+}
+
+export interface NotifyChannel {
+  id: string
+  name: string
+  type: string
+  config: Record<string, unknown>
+  enabled: boolean
+  created_at: number
 }
 
 export interface ScheduleItem {

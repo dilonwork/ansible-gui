@@ -28,7 +28,7 @@ from .celery_app import celery
 from .db import init_db, session_scope
 from .crypto import encrypt_str
 from .launch import PING_YML, launch_job, template_snapshot
-from .models import Host, Job, MaintenanceRun, Playbook, Schedule, Template
+from .models import Host, Job, MaintenanceRun, NotificationChannel, Playbook, Schedule, Template
 from .runner_service import syntax_check_playbook
 from .schedules import (count_missed, describe_cron, next_occurrence,
                         preview_next, validate_cron, validate_timezone)
@@ -96,6 +96,7 @@ class TemplateIn(BaseModel):
     host_ids: list[str]
     extra_vars: dict = {}
     check_mode: bool = False
+    notification_policy: str = "failure_only"  # always | failure_only | never
 
 
 class JobIn(BaseModel):
@@ -225,6 +226,8 @@ def playbook_syntax_check(pid: str):
 # ---------- job templates ----------
 @app.post("/api/templates")
 def add_template(t: TemplateIn):
+    if t.notification_policy not in ("always", "failure_only", "never"):
+        raise HTTPException(400, "notification_policy must be always|failure_only|never")
     with session_scope() as s:
         if not s.get(Playbook, t.playbook_id):
             raise HTTPException(400, "unknown playbook_id")
@@ -235,7 +238,9 @@ def add_template(t: TemplateIn):
         tid = uuid.uuid4().hex[:8]
         s.add(Template(id=tid, name=t.name, playbook_id=t.playbook_id,
                        host_ids=list(t.host_ids), extra_vars=dict(t.extra_vars),
-                       check_mode=t.check_mode, created_at=time.time()))
+                       check_mode=t.check_mode,
+                       notification_policy=t.notification_policy,
+                       created_at=time.time()))
     return {"id": tid}
 
 
@@ -248,7 +253,9 @@ def list_templates():
             out.append({"id": t.id, "name": t.name, "playbook_id": t.playbook_id,
                         "playbook_name": pb.name if pb else "(deleted)",
                         "host_ids": t.host_ids, "extra_vars": t.extra_vars,
-                        "check_mode": t.check_mode, "created_at": t.created_at})
+                        "check_mode": t.check_mode,
+                        "notification_policy": t.notification_policy or "failure_only",
+                        "created_at": t.created_at})
         return out
 
 
@@ -708,6 +715,73 @@ def run_schedule_now(sid: str):
         r.last_job_id = jid
         r.last_status = "launched (manual)"
     return {"job_id": jid}
+
+
+# ---------- notification channels (M8.1) ----------
+class ChannelIn(BaseModel):
+    name: str
+    type: str = "webhook"
+    config: dict = {}   # webhook: {url, headers}
+    enabled: bool = True
+
+
+def _channel_public(c: NotificationChannel) -> dict:
+    return {"id": c.id, "name": c.name, "type": c.type,
+            "config": c.config or {}, "enabled": c.enabled,
+            "created_at": c.created_at}
+
+
+@app.get("/api/notification-channels")
+def list_channels():
+    with session_scope() as s:
+        return [_channel_public(c) for c in s.query(NotificationChannel).all()]
+
+
+@app.post("/api/notification-channels")
+def add_channel(ch: ChannelIn):
+    if ch.type != "webhook":
+        raise HTTPException(400, "only 'webhook' channels are supported for now")
+    if not (ch.config or {}).get("url"):
+        raise HTTPException(400, "config.url is required")
+    with session_scope() as s:
+        cid = uuid.uuid4().hex[:8]
+        s.add(NotificationChannel(id=cid, name=ch.name, type=ch.type,
+                                  config=dict(ch.config), enabled=ch.enabled,
+                                  created_at=time.time()))
+    return {"id": cid}
+
+
+@app.delete("/api/notification-channels/{cid}")
+def delete_channel(cid: str):
+    with session_scope() as s:
+        c = s.get(NotificationChannel, cid)
+        if c:
+            s.delete(c)
+    return {"ok": True}
+
+
+@app.post("/api/notification-channels/{cid}/test")
+def test_channel(cid: str):
+    """Send a test payload to the channel; returns what the endpoint said."""
+    import urllib.request, urllib.error, json as _json
+    with session_scope() as s:
+        c = s.get(NotificationChannel, cid)
+        if not c:
+            raise HTTPException(404, "no such channel")
+        url = (c.config or {}).get("url")
+        headers = (c.config or {}).get("headers", {})
+    payload = {"event": "test", "message": "Drydock test notification",
+               "link": "/"}
+    try:
+        req = urllib.request.Request(
+            url, data=_json.dumps(payload).encode(), method="POST",
+            headers={"Content-Type": "application/json", **headers})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return {"ok": True, "status": resp.status}
+    except urllib.error.HTTPError as e:
+        raise HTTPException(400, f"webhook returned HTTP {e.code}")
+    except Exception as e:
+        raise HTTPException(400, f"webhook unreachable: {e}")
 
 
 # ---------- websocket: live event stream ----------

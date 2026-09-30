@@ -10,6 +10,7 @@ export default function Templates() {
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [varsText, setVarsText] = useState('{}')
   const [checkMode, setCheckMode] = useState(false)
+  const [notifyPolicy, setNotifyPolicy] = useState('failure_only')
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -33,7 +34,7 @@ export default function Templates() {
     if (!name || !pbId || sel.size === 0) { setMsg('✕ Name, playbook and at least one host are required'); return }
     setBusy(true)
     try {
-      await api.addTemplate({ name, playbook_id: pbId, host_ids: [...sel], extra_vars, check_mode: checkMode })
+      await api.addTemplate({ name, playbook_id: pbId, host_ids: [...sel], extra_vars, check_mode: checkMode, notification_policy: notifyPolicy })
       setMsg('✓ Template created')
       setName(''); setPbId(''); setSel(new Set()); setVarsText('{}'); setCheckMode(false)
       refresh()
@@ -76,6 +77,12 @@ export default function Templates() {
             <input type="checkbox" checked={checkMode} onChange={e => setCheckMode(e.target.checked)} />
             Check mode by default <small>(dry-run, --check)</small>
           </label>
+          <label>Notifications</label>
+          <select value={notifyPolicy} onChange={e => setNotifyPolicy(e.target.value)}>
+            <option value="failure_only">On failure only</option>
+            <option value="always">Always</option>
+            <option value="never">Never</option>
+          </select>
           <button className="btn" onClick={add} disabled={busy}>＋ Create template</button>
           <div className="form-msg mut">{msg}</div>
         </div>
@@ -84,7 +91,7 @@ export default function Templates() {
           <h2>Template list</h2>
           {list.length === 0 ? <div className="empty">No templates yet</div> : (
             <table>
-              <thead><tr><th>Name</th><th>Playbook</th><th>Hosts</th><th>Mode</th><th></th></tr></thead>
+              <thead><tr><th>Name</th><th>Playbook</th><th>Hosts</th><th>Mode</th><th>Notify</th><th></th></tr></thead>
               <tbody>
                 {list.map(t => (
                   <tr key={t.id}>
@@ -92,6 +99,7 @@ export default function Templates() {
                     <td className="mut">{t.playbook_name}</td>
                     <td className="mut">{t.host_ids.length}</td>
                     <td>{t.check_mode ? <span className="tag t-amber">check</span> : <span className="tag t-gray">normal</span>}</td>
+                    <td className="mut" style={{ fontSize: 12 }}>{t.notification_policy === 'always' ? 'always' : t.notification_policy === 'never' ? 'never' : 'on failure'}</td>
                     <td style={{textAlign: 'right'}}>
                       <button className="btn danger-ghost" onClick={() => del(t.id)}>Delete</button>
                     </td>

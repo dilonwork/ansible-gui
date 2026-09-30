@@ -10,14 +10,17 @@ Redis keys:
 - ``drydock:job-rundir:{jid}`` -> worker temp dir holding the 600 SSH key file,
   so cancel can clean it up after terminating the worker process.
 """
+import json
 import logging
 import time
+import urllib.request
+import urllib.error
 
 from .celery_app import celery
 from .crypto import decrypt_str
 from .db import session_scope
 from . import events
-from .models import Host, Job
+from .models import Host, Job, NotificationChannel, Template
 from .runner_service import run_playbook
 
 log = logging.getLogger("drydock.tasks")
@@ -26,6 +29,8 @@ TASK_KEY = "drydock:job-task:{jid}"
 RUNDIR_KEY = "drydock:job-rundir:{jid}"
 
 FINAL_STATUSES = ("successful", "failed", "cancelled", "interrupted")
+
+NOTIFY_POLICIES = ("always", "failure_only", "never")
 
 
 def _finish_job(job_id: str, status: str) -> bool:
@@ -36,7 +41,93 @@ def _finish_job(job_id: str, status: str) -> bool:
             Job.id == job_id, Job.status == "running"
         ).update({"status": status, "finished_at": time.time()},
                  synchronize_session=False)
-        return n > 0
+    # notify after commit so the summary sees the final state
+    if n > 0:
+        _maybe_notify(job_id, status)
+    return n > 0
+
+
+def _maybe_notify(job_id: str, status: str) -> None:
+    """Enqueue a notification if the job's template policy wants one. (M8.1)"""
+    with session_scope() as s:
+        job = s.get(Job, job_id)
+        snap = (job.snapshot or {}) if job else {}
+        if snap.get("kind") != "template":
+            return  # ad-hoc runs are watched interactively; never notify
+        t = s.get(Template, snap.get("template_id"))
+        policy = (t.notification_policy or "failure_only") if t else "failure_only"
+    if policy == "never":
+        return
+    if status == "successful" and policy != "always":
+        return
+    try:
+        send_notification.delay(job_id, status)
+    except Exception as e:
+        log.warning("could not enqueue notification for job %s: %s", job_id, e)
+
+
+def _job_summary(job_id: str) -> dict | None:
+    """Build the notification payload for a finished job."""
+    with session_scope() as s:
+        job = s.get(Job, job_id)
+        if not job:
+            return None
+        snap = job.snapshot or {}
+        host_ids = list(job.host_ids or [])
+        names = {h.id: h.name for h in
+                 s.query(Host).filter(Host.id.in_(host_ids)).all()}
+        all_names = [names.get(i, i) for i in host_ids]
+        failed = sorted({e.get("host") for e in (job.events or [])
+                         if e.get("type") in ("host_failed", "host_unreachable")
+                         and e.get("host")})
+        succeeded = [n for n in all_names if n not in failed]
+        created = job.created_at or time.time()
+        finished = job.finished_at or time.time()
+        return {
+            "event": "job_finished",
+            "job_id": job_id,
+            "status": job.status,
+            "template_name": snap.get("template_name"),
+            "playbook_name": snap.get("playbook_name"),
+            "schedule_name": snap.get("schedule_name"),
+            "hosts_total": len(host_ids),
+            "hosts_succeeded": len(succeeded),
+            "failed_hosts": failed,
+            "duration_s": round(finished - created, 1),
+            "link": f"/jobs/{job_id}",
+        }
+
+
+def _post_webhook(url: str, headers: dict, payload: dict) -> None:
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(
+        url, data=data, method="POST",
+        headers={"Content-Type": "application/json", **(headers or {})})
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        if resp.status >= 400:
+            raise urllib.error.URLError(f"webhook returned {resp.status}")
+
+
+@celery.task(bind=True, name="drydock.send_notification",
+             autoretry_for=(Exception,), retry_kwargs={"max_retries": 3},
+             retry_backoff=60, max_retries=3)
+def send_notification(self, job_id: str, status: str) -> None:
+    """POST the job outcome to every enabled webhook channel. (M8.1)"""
+    payload = _job_summary(job_id)
+    if payload is None:
+        return
+    with session_scope() as s:
+        channels = s.query(NotificationChannel).filter(
+            NotificationChannel.enabled == True,  # noqa: E712
+            NotificationChannel.type == "webhook").all()
+        targets = [(c.name, (c.config or {}).get("url"),
+                    (c.config or {}).get("headers", {})) for c in channels]
+    for name, url, headers in targets:
+        if not url:
+            log.warning("notification channel %s has no url, skipping", name)
+            continue
+        log.info("notifying channel %s for job %s (%s)", name, job_id, status)
+        _post_webhook(url, headers, payload)
 
 
 @celery.task(bind=True, name="drydock.run_job", max_retries=0)

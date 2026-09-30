@@ -94,6 +94,13 @@ One-click rolling maintenance: `POST /api/maintenance`
 - No duplicate enabled schedules for the same template + cron + timezone
 - `POST /api/schedules/{id}/run-now` launches immediately without shifting the cadence; disabling clears `next_run_at`; scheduled jobs carry `schedule_id`
 
+## Notifications (M8.1)
+
+- `NotificationChannel`: currently `webhook` only — POSTs JSON on job finish
+- Per-template policy: `always` | `failure_only` (default) | `never`; ad-hoc jobs never notify
+- Payload: `event, job_id, status, template_name, hosts_total, hosts_succeeded, failed_hosts, duration_s, link`
+- `drydock.send_notification` (in `app/tasks.py`, autoretry x3) fires from `_finish_job`; `POST /api/notification-channels/{id}/test` verifies a channel
+
 ## Security design (done)
 
 - SSH private keys are written to a 600 temp file only for the duration of a run, then deleted
