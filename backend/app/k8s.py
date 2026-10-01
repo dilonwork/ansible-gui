@@ -84,6 +84,7 @@ class K8sSession:
         # be explicit: never let a proxy swallow cluster traffic by accident
         self.api = k8s.ApiClient(cfg)
         self.core = k8s.CoreV1Api(self.api)
+        self.apps = k8s.AppsV1Api(self.api)
         self.version_api = k8s.VersionApi(self.api)
 
     def close(self):
@@ -146,6 +147,93 @@ def list_nodes(kubeconfig_yaml: str) -> list[dict]:
     with K8sSession(kubeconfig_yaml) as s:
         return [parse_node(n) for n in
                 s.core.list_node(_request_timeout=REQUEST_TIMEOUT).items]
+
+
+def _images(pod_spec) -> list[str]:
+    containers = (pod_spec.containers or []) if pod_spec else []
+    return [c.image for c in containers if c.image]
+
+
+def _workload_status(kind: str, desired: int, ready: int, updated: int) -> str:
+    if ready < desired:
+        return "degraded"
+    if updated < desired:
+        return "progressing"
+    return "ready"
+
+
+def parse_workload(kind: str, w) -> dict:
+    """One row for the workload table (4.5)."""
+    spec = w.spec
+    status = w.status
+    if kind == "DaemonSet":
+        desired = status.desired_number_scheduled or 0
+        ready = status.number_available or 0
+        updated = status.updated_number_scheduled or 0
+    else:
+        desired = spec.replicas or 0
+        ready = status.ready_replicas or 0
+        updated = status.updated_replicas or 0
+    created = w.metadata.creation_timestamp
+    return {
+        "kind": kind,
+        "namespace": w.metadata.namespace,
+        "name": w.metadata.name,
+        "desired": desired,
+        "ready": ready,
+        "updated": updated,
+        "status": _workload_status(kind, desired, ready, updated),
+        "images": _images(spec.template.spec if spec.template else None),
+        "created_at": created.timestamp() if created else None,
+    }
+
+
+def list_workloads(kubeconfig_yaml: str) -> list[dict]:
+    """Deployments, StatefulSets, DaemonSets across all namespaces (4.5)."""
+    with K8sSession(kubeconfig_yaml) as s:
+        out = []
+        for d in s.apps.list_deployment_for_all_namespaces(
+                _request_timeout=REQUEST_TIMEOUT).items:
+            out.append(parse_workload("Deployment", d))
+        for st in s.apps.list_stateful_set_for_all_namespaces(
+                _request_timeout=REQUEST_TIMEOUT).items:
+            out.append(parse_workload("StatefulSet", st))
+        for ds in s.apps.list_daemon_set_for_all_namespaces(
+                _request_timeout=REQUEST_TIMEOUT).items:
+            out.append(parse_workload("DaemonSet", ds))
+    out.sort(key=lambda w: (w["namespace"], w["kind"], w["name"]))
+    return out
+
+
+def _event_time(e):
+    return e.last_timestamp or e.event_time or e.first_timestamp
+
+
+def parse_event(e) -> dict:
+    t = _event_time(e)
+    return {
+        "type": e.type or "Normal",
+        "reason": e.reason or "",
+        "kind": e.involved_object.kind if e.involved_object else "",
+        "name": e.involved_object.name if e.involved_object else "",
+        "namespace": e.involved_object.namespace if e.involved_object else "",
+        "message": (e.message or "")[:300],
+        "count": e.count or 0,
+        "last_seen": t.timestamp() if t else None,
+    }
+
+
+def list_events(kubeconfig_yaml: str, limit: int = 50) -> list[dict]:
+    """Most recent cluster events, warnings first (4.6)."""
+    with K8sSession(kubeconfig_yaml) as s:
+        items = s.core.list_event_for_all_namespaces(
+            _request_timeout=REQUEST_TIMEOUT).items
+    parsed = [parse_event(e) for e in items]
+    parsed.sort(key=lambda e: (
+        0 if e["type"] == "Warning" else 1,
+        -(e["last_seen"] or 0),
+    ))
+    return parsed[:limit]
 
 
 def get_overview(kubeconfig_yaml: str) -> dict:

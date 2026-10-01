@@ -148,6 +148,35 @@ def test_delete_cluster(client, fake):
     assert client.get(f"/api/clusters/{cid}").status_code == 404
 
 
+def test_workloads(client, fake):
+    cid = _onboard(client, fake)
+    wl = client.get(f"/api/clusters/{cid}/workloads").json()
+    assert wl["stale"] is False
+    ws = {(w["kind"], w["name"]): w for w in wl["workloads"]}
+    assert len(ws) == 4
+    assert ws[("Deployment", "web")]["status"] == "ready"
+    assert ws[("Deployment", "web")]["ready"] == 3
+    assert ws[("Deployment", "web")]["images"] == ["example/web:2"]
+    assert ws[("Deployment", "api")]["status"] == "progressing"  # 2/3 updated
+    assert ws[("StatefulSet", "db")]["status"] == "degraded"     # 1/3 ready
+    assert ws[("DaemonSet", "agent")]["status"] == "ready"
+
+
+def test_events_warnings_first(client, fake):
+    cid = _onboard(client, fake)
+    ev = client.get(f"/api/clusters/{cid}/events").json()
+    assert ev["stale"] is False
+    es = ev["events"]
+    assert len(es) == 3
+    # warnings first, newest first
+    assert [e["type"] for e in es] == ["Warning", "Warning", "Normal"]
+    assert es[0]["reason"] == "FailedScheduling"  # 3 min ago
+    assert es[1]["reason"] == "BackOff"           # 10 min ago
+    assert es[0]["count"] == 5
+    assert es[0]["name"] == "pending-1"
+    assert "insufficient cpu" in es[0]["message"]
+
+
 def test_categorize_error_unit():
     assert "RBAC" in k8s_mod.categorize_error(ApiException(status=403))
     assert "401" in k8s_mod.categorize_error(ApiException(status=401))

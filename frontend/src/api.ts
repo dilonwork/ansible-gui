@@ -138,6 +138,8 @@ export const api = {
   testCluster: (id: string) => req<{ ok: boolean; error?: string; k8s_version?: string; detail?: string }>('/api/clusters/' + id + '/test', { method: 'POST' }),
   clusterOverview: (id: string) => req<ClusterOverview>('/api/clusters/' + id + '/overview'),
   clusterNodes: (id: string) => req<{ nodes: ClusterNode[]; stale: boolean; error?: string }>('/api/clusters/' + id + '/nodes'),
+  clusterWorkloads: (id: string) => req<{ workloads: ClusterWorkload[]; stale: boolean; error?: string }>('/api/clusters/' + id + '/workloads'),
+  clusterEvents: (id: string) => req<{ events: ClusterEvent[]; stale: boolean; error?: string }>('/api/clusters/' + id + '/events'),
 }
 
 export interface ClusterItem {
@@ -174,6 +176,29 @@ export interface ClusterOverview {
   pods_by_phase?: Record<string, number>
   abnormal_pods?: { namespace: string; name: string; phase: string; reason: string; restarts: number }[]
   last_sync_at?: number | null
+}
+
+export interface ClusterWorkload {
+  kind: string
+  namespace: string
+  name: string
+  desired: number
+  ready: number
+  updated: number
+  status: 'ready' | 'progressing' | 'degraded'
+  images: string[]
+  created_at: number | null
+}
+
+export interface ClusterEvent {
+  type: string
+  reason: string
+  kind: string
+  name: string
+  namespace: string
+  message: string
+  count: number
+  last_seen: number | null
 }
 
 export interface NotifyChannel {

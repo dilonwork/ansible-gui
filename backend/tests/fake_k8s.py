@@ -2,10 +2,12 @@
 
 Serves payloads built from the official ``kubernetes`` client models, so the
 JSON shapes are guaranteed real. Endpoints: /version, /api/v1/nodes,
-/api/v1/pods. ``mode="forbidden"`` makes /api/v1/nodes return 403 (RBAC).
+/api/v1/pods, /apis/apps/v1/{deployments,statefulsets,daemonsets},
+/api/v1/events. ``mode="forbidden"`` makes /api/v1/nodes return 403 (RBAC).
 """
 import json
 import threading
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import yaml
@@ -58,6 +60,71 @@ def _pod(namespace, name, phase, restarts=0, wait_reason=None):
                                container_statuses=containers))
 
 
+def _pod_template(image):
+    return k8s.V1PodTemplateSpec(
+        metadata=k8s.V1ObjectMeta(labels={"app": "x"}),
+        spec=k8s.V1PodSpec(containers=[
+            k8s.V1Container(name="main", image=image)]))
+
+
+def _deployment(namespace, name, image, replicas, ready, updated):
+    now = datetime.now(timezone.utc)
+    return k8s.V1Deployment(
+        metadata=k8s.V1ObjectMeta(name=name, namespace=namespace,
+                                  creation_timestamp=now - timedelta(hours=2)),
+        spec=k8s.V1DeploymentSpec(
+            replicas=replicas,
+            selector=k8s.V1LabelSelector(match_labels={"app": "x"}),
+            template=_pod_template(image)),
+        status=k8s.V1DeploymentStatus(
+            replicas=replicas, ready_replicas=ready,
+            updated_replicas=updated, available_replicas=ready))
+
+
+def _statefulset(namespace, name, image, replicas, ready):
+    now = datetime.now(timezone.utc)
+    return k8s.V1StatefulSet(
+        metadata=k8s.V1ObjectMeta(name=name, namespace=namespace,
+                                  creation_timestamp=now - timedelta(days=1)),
+        spec=k8s.V1StatefulSetSpec(
+            service_name=name, replicas=replicas,
+            selector=k8s.V1LabelSelector(match_labels={"app": "x"}),
+            template=_pod_template(image)),
+        status=k8s.V1StatefulSetStatus(
+            replicas=replicas, ready_replicas=ready,
+            updated_replicas=ready))
+
+
+def _daemonset(namespace, name, image, desired, available):
+    now = datetime.now(timezone.utc)
+    return k8s.V1DaemonSet(
+        metadata=k8s.V1ObjectMeta(name=name, namespace=namespace,
+                                  creation_timestamp=now - timedelta(days=3)),
+        spec=k8s.V1DaemonSetSpec(
+            selector=k8s.V1LabelSelector(match_labels={"app": "x"}),
+            template=_pod_template(image)),
+        status=k8s.V1DaemonSetStatus(
+            current_number_scheduled=desired,
+            desired_number_scheduled=desired,
+            number_available=available,
+            number_misscheduled=0,
+            number_ready=available,
+            updated_number_scheduled=available))
+
+
+def _event(namespace, name, etype, reason, obj_kind, obj_name, message,
+           count, minutes_ago):
+    now = datetime.now(timezone.utc)
+    ts = now - timedelta(minutes=minutes_ago)
+    return k8s.CoreV1Event(
+        metadata=k8s.V1ObjectMeta(name=name, namespace=namespace,
+                                  creation_timestamp=ts),
+        involved_object=k8s.V1ObjectReference(
+            kind=obj_kind, name=obj_name, namespace=namespace),
+        reason=reason, message=message, type=etype, count=count,
+        first_timestamp=ts - timedelta(minutes=5), last_timestamp=ts)
+
+
 def fixtures():
     api = k8s.ApiClient()
     nodes = k8s.V1NodeList(items=[
@@ -79,10 +146,32 @@ def fixtures():
         git_commit="abc123", git_tree_state="clean",
         build_date="2024-01-01T00:00:00Z",
         go_version="go1.22.0", compiler="gc", platform="linux/amd64"))
+    deployments = k8s.V1DeploymentList(items=[
+        _deployment("default", "web", "example/web:2", 3, 3, 3),      # ready
+        _deployment("default", "api", "example/api:7", 3, 3, 2),      # progressing
+    ])
+    statefulsets = k8s.V1StatefulSetList(items=[
+        _statefulset("default", "db", "example/db:1", 3, 1),          # degraded
+    ])
+    daemonsets = k8s.V1DaemonSetList(items=[
+        _daemonset("kube-system", "agent", "example/agent:4", 3, 3),  # ready
+    ])
+    events = k8s.CoreV1EventList(items=[
+        _event("default", "e1", "Warning", "FailedScheduling", "Pod",
+               "pending-1", "0/3 nodes are available: insufficient cpu.", 5, 3),
+        _event("default", "e2", "Warning", "BackOff", "Pod",
+               "app-2", 'Back-off restarting failed container "main".', 12, 10),
+        _event("default", "e3", "Normal", "Scheduled", "Pod",
+               "app-1", "Successfully assigned default/app-1 to k3s-worker-01.", 1, 60),
+    ])
     return {
         "/version": version,
         "/api/v1/nodes": ser(nodes),
         "/api/v1/pods": ser(pods),
+        "/apis/apps/v1/deployments": ser(deployments),
+        "/apis/apps/v1/statefulsets": ser(statefulsets),
+        "/apis/apps/v1/daemonsets": ser(daemonsets),
+        "/api/v1/events": ser(events),
     }
 
 

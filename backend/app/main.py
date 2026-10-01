@@ -895,6 +895,16 @@ def cluster_nodes(cid: str):
     return _live_or_stale(cid, lambda kc: {"nodes": k8s_mod.list_nodes(kc)})
 
 
+@app.get("/api/clusters/{cid}/workloads")
+def cluster_workloads(cid: str):
+    return _live_or_stale(cid, lambda kc: {"workloads": k8s_mod.list_workloads(kc)})
+
+
+@app.get("/api/clusters/{cid}/events")
+def cluster_events(cid: str):
+    return _live_or_stale(cid, lambda kc: {"events": k8s_mod.list_events(kc)})
+
+
 # ---------- websocket: live event stream ----------
 @app.websocket("/ws/jobs/{jid}")
 async def job_stream(ws: WebSocket, jid: str):
