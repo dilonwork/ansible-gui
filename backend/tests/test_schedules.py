@@ -15,11 +15,12 @@ os.environ["CELERY_EAGER"] = "1"
 
 import pytest
 from fastapi.testclient import TestClient
+from tests import login_as_admin
 
 from app import main as main_mod
 from app.db import init_db, session_scope
 from app.main import app
-from app.models import Host, Job, MaintenanceRun, Playbook, Schedule, Template
+from app.models import Host, Job, MaintenanceRun, Playbook, Schedule, Session, Template, User
 from app.schedules import count_missed, describe_cron, next_occurrence
 
 
@@ -29,13 +30,14 @@ def client(monkeypatch):
     init_db()
     _clear_db()
     with TestClient(app) as c:
+        login_as_admin(c)
         yield c
     _clear_db()
 
 
 def _clear_db():
     with session_scope() as s:
-        for m in (Schedule, MaintenanceRun, Job, Template, Playbook, Host):
+        for m in (Schedule, MaintenanceRun, Job, Template, Playbook, Host, Session, User):
             s.query(m).delete()
 
 

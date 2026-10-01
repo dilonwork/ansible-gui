@@ -14,12 +14,13 @@ os.environ["CELERY_EAGER"] = "1"
 
 import pytest
 from fastapi.testclient import TestClient
+from tests import login_as_admin
 
 from app import main as main_mod
 from app import maintenance_tasks as mt
 from app.db import init_db, session_scope
 from app.main import app
-from app.models import Host, Job, MaintenanceRun, Playbook, Template
+from app.models import Host, Job, MaintenanceRun, Playbook, Session, Template, User
 
 
 @pytest.fixture
@@ -28,13 +29,14 @@ def client(monkeypatch):
     init_db()
     _clear_db()
     with TestClient(app) as c:
+        login_as_admin(c)
         yield c
     _clear_db()
 
 
 def _clear_db():
     with session_scope() as s:
-        for m in (MaintenanceRun, Job, Template, Playbook, Host):
+        for m in (MaintenanceRun, Job, Template, Playbook, Host, Session, User):
             s.query(m).delete()
 
 

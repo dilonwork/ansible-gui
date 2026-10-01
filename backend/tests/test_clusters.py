@@ -12,6 +12,7 @@ os.environ["CELERY_EAGER"] = "1"
 
 import pytest
 from fastapi.testclient import TestClient
+from tests import login_as_admin
 from kubernetes.client.rest import ApiException
 
 from app import main as main_mod
@@ -19,7 +20,7 @@ from app import k8s as k8s_mod
 from app.db import init_db, session_scope
 from app.main import app
 from app.models import Cluster, Host, Job, MaintenanceRun, NotificationChannel, \
-    Playbook, Schedule, Template
+    Playbook, Schedule, Session, Template, User
 from tests.fake_k8s import FakeK8s, kubeconfig_for
 
 
@@ -29,6 +30,7 @@ def client(monkeypatch):
     init_db()
     _clear_db()
     with TestClient(app) as c:
+        login_as_admin(c)
         yield c
     _clear_db()
 
@@ -36,7 +38,7 @@ def client(monkeypatch):
 def _clear_db():
     with session_scope() as s:
         for m in (Cluster, NotificationChannel, Schedule, MaintenanceRun,
-                  Job, Template, Playbook, Host):
+                  Job, Template, Playbook, Host, Session, User):
             s.query(m).delete()
 
 

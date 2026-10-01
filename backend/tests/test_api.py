@@ -17,12 +17,13 @@ os.environ["CELERY_EAGER"] = "1"  # celery tasks run inline; no Redis needed
 
 import pytest
 from fastapi.testclient import TestClient
+from tests import login_as_admin, ws_url
 
 from app import main
 from app import runner_service
 from app.db import init_db, session_scope
 from app.main import app
-from app.models import Host, Job, Playbook, Template
+from app.models import Host, Job, Playbook, Session, Template, User
 
 
 @pytest.fixture
@@ -31,13 +32,14 @@ def client(monkeypatch):
     init_db()  # tables must exist before the first clear (lifespan runs later)
     _clear_db()
     with TestClient(app) as c:
+        login_as_admin(c)
         yield c
     _clear_db()
 
 
 def _clear_db():
     with session_scope() as s:
-        for m in (Job, Template, Playbook, Host):
+        for m in (Session, User, Job, Template, Playbook, Host):
             s.query(m).delete()
 
 
@@ -305,7 +307,7 @@ def test_ws_late_joiner_gets_history_then_eof(client, monkeypatch):
     hid = _add_host(client)
     jid = client.post("/api/jobs", json={"host_ids": [hid]}).json()["job_id"]
     _wait_done(client, jid)  # job finishes first, WS connects late
-    with client.websocket_connect(f"/ws/jobs/{jid}") as ws:
+    with client.websocket_connect(ws_url(client, f"/ws/jobs/{jid}")) as ws:
         got = []
         while True:
             e = ws.receive_json()
@@ -316,6 +318,12 @@ def test_ws_late_joiner_gets_history_then_eof(client, monkeypatch):
 
 
 def test_ws_unknown_job_rejected(client):
+    with pytest.raises(Exception):
+        with client.websocket_connect(ws_url(client, "/ws/jobs/nope")):
+            pass
+
+
+def test_ws_without_token_rejected(client):
     with pytest.raises(Exception):
         with client.websocket_connect("/ws/jobs/nope"):
             pass

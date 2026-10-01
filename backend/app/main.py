@@ -7,8 +7,8 @@ the event bus (DB + Redis pub/sub) -> WebSocket pushes to the frontend.
 Persistence: SQLAlchemy; PostgreSQL under docker compose,
 SQLite file for local dev (DATABASE_URL selects).
 
-Deliberate simplifications (to be replaced later):
-- no auth (later: login + RBAC)
+Auth: local accounts with bcrypt passwords, opaque bearer tokens,
+roles admin/operator/viewer (viewers are read-only).
 """
 import asyncio
 import logging
@@ -18,18 +18,19 @@ import time
 import uuid
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from . import auth as auth_mod
 from . import events
 from .celery_app import celery
 from .db import init_db, session_scope
 from .crypto import decrypt_str, encrypt_str
 from .launch import PING_YML, launch_job, template_snapshot
 from .models import (Host, Job, MaintenanceRun, NotificationChannel, Playbook,
-                     Schedule, Template, Cluster)
+                     Schedule, Session, Template, Cluster, User)
 from .runner_service import syntax_check_playbook
 from .schedules import (count_missed, describe_cron, next_occurrence,
                         preview_next, validate_cron, validate_timezone)
@@ -76,6 +77,38 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Drydock API", lifespan=lifespan)
+
+
+# ---------- auth ----------
+AUTH_OPEN = {"/api/auth/login", "/api/auth/setup", "/api/auth/status"}
+READ_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+
+def _bearer_token(request: Request) -> str:
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return ""
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    path = request.url.path
+    if path.startswith("/api/") and path not in AUTH_OPEN:
+        user = auth_mod.get_user_by_token(_bearer_token(request))
+        if not user:
+            return JSONResponse({"detail": "authentication required"}, 401)
+        if user.role == "viewer" and request.method not in READ_METHODS:
+            return JSONResponse({"detail": "viewers are read-only"}, 403)
+        request.state.user = user
+    return await call_next(request)
+
+
+def _require_admin(request: Request):
+    user = getattr(request.state, "user", None)
+    if not user or user.role != "admin":
+        raise HTTPException(403, "admin only")
+    return user
 
 
 # ---------- models ----------
@@ -140,6 +173,126 @@ def _job_full(j: Job) -> dict:
     return {"id": j.id, "host_ids": j.host_ids, "status": j.status,
             "snapshot": j.snapshot, "events": j.events or [],
             "created_at": j.created_at, "finished_at": j.finished_at}
+
+
+# ---------- auth ----------
+class AuthIn(BaseModel):
+    username: str
+    password: str
+
+
+class UserIn(BaseModel):
+    username: str
+    password: str
+    role: str = "operator"
+
+
+class UserPatch(BaseModel):
+    password: str | None = None
+    role: str | None = None
+
+
+@app.get("/api/auth/status")
+def auth_status():
+    return {"setup_required": auth_mod.user_count() == 0}
+
+
+@app.post("/api/auth/setup")
+def auth_setup(body: AuthIn):
+    """Create the first admin account. Only works when no users exist."""
+    if auth_mod.user_count() > 0:
+        raise HTTPException(400, "setup already completed")
+    try:
+        u = auth_mod.create_user(body.username, body.password, role="admin")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    token = auth_mod.create_session(u.id)
+    return {"token": token, "username": u.username, "role": u.role}
+
+
+@app.post("/api/auth/login")
+def auth_login(body: AuthIn):
+    with session_scope() as s:
+        u = s.query(User).filter_by(username=body.username.strip()).first()
+        if not u or not auth_mod.verify_password(body.password, u.password_hash):
+            raise HTTPException(401, "invalid username or password")
+        uid = u.id
+    token = auth_mod.create_session(uid)
+    with session_scope() as s:
+        u = s.get(User, uid)
+        return {"token": token, "username": u.username, "role": u.role}
+
+
+@app.post("/api/auth/logout")
+def auth_logout(request: Request):
+    auth_mod.revoke_token(_bearer_token(request))
+    return {"ok": True}
+
+
+@app.get("/api/auth/me")
+def auth_me(request: Request):
+    u = request.state.user
+    return {"username": u.username, "role": u.role,
+            "can_write": u.role != "viewer"}
+
+
+@app.get("/api/users")
+def list_users(request: Request):
+    _require_admin(request)
+    with session_scope() as s:
+        return [auth_mod.public_user(u) for u in s.query(User).all()]
+
+
+@app.post("/api/users")
+def create_user(body: UserIn, request: Request):
+    _require_admin(request)
+    try:
+        u = auth_mod.create_user(body.username, body.password, body.role)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return auth_mod.public_user(u)
+
+
+@app.patch("/api/users/{uid}")
+def update_user(uid: str, body: UserPatch, request: Request):
+    me = _require_admin(request)
+    with session_scope() as s:
+        u = s.get(User, uid)
+        if not u:
+            raise HTTPException(404, "no such user")
+        if body.role is not None:
+            if body.role not in auth_mod.ROLES:
+                raise HTTPException(400, f"role must be one of {auth_mod.ROLES}")
+            if u.role == "admin" and body.role != "admin" \
+                    and auth_mod.admin_count() <= 1:
+                raise HTTPException(400, "cannot demote the last admin")
+            u.role = body.role
+        if body.password is not None:
+            try:
+                auth_mod.validate_new_password(body.password)
+            except ValueError as e:
+                raise HTTPException(400, str(e))
+            u.password_hash = auth_mod.hash_password(body.password)
+            # changing a password kills all other sessions
+            s.query(Session).filter(Session.user_id == u.id,
+                                    Session.token != _bearer_token(request)).delete()
+        return auth_mod.public_user(u)
+
+
+@app.delete("/api/users/{uid}")
+def delete_user(uid: str, request: Request):
+    me = _require_admin(request)
+    if uid == me.id:
+        raise HTTPException(400, "cannot delete yourself")
+    with session_scope() as s:
+        u = s.get(User, uid)
+        if not u:
+            raise HTTPException(404, "no such user")
+        if u.role == "admin" and auth_mod.admin_count() <= 1:
+            raise HTTPException(400, "cannot delete the last admin")
+        s.query(Session).filter_by(user_id=uid).delete()
+        s.delete(u)
+    return {"ok": True}
 
 
 # ---------- hosts ----------
@@ -919,6 +1072,10 @@ async def maintenance_stream(ws: WebSocket, rid: str):
 
 async def _event_stream(ws: WebSocket, rid: str, model,
                         terminal_types: tuple) -> None:
+    # bearer token via query param (browsers can't set WS headers)
+    if not auth_mod.get_user_by_token(ws.query_params.get("token", "")):
+        await ws.close(code=4401)
+        return
     with session_scope() as s:
         obj = s.get(model, rid)
         if not obj:

@@ -18,13 +18,14 @@ os.environ["CELERY_EAGER"] = "1"
 
 import pytest
 from fastapi.testclient import TestClient
+from tests import login_as_admin
 
 from app import main as main_mod
 from app import tasks as tasks_mod
 from app.db import init_db, session_scope
 from app.main import app
 from app.models import (Host, Job, MaintenanceRun, NotificationChannel,
-                        Playbook, Schedule, Template)
+                        Playbook, Schedule, Session, Template, User)
 
 
 @pytest.fixture
@@ -33,6 +34,7 @@ def client(monkeypatch):
     init_db()
     _clear_db()
     with TestClient(app) as c:
+        login_as_admin(c)
         yield c
     _clear_db()
 
@@ -51,7 +53,7 @@ def webhook_calls(monkeypatch):
 def _clear_db():
     with session_scope() as s:
         for m in (NotificationChannel, Schedule, MaintenanceRun, Job,
-                  Template, Playbook, Host):
+                  Template, Playbook, Host, Session, User):
             s.query(m).delete()
 
 

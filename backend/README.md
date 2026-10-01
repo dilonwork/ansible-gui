@@ -43,6 +43,16 @@ late WebSocket joiners get the full replay from the database.
 
 ## API
 
+### Auth & RBAC
+
+- First run: `POST /api/auth/setup` {username, password} creates the admin account (only works when no users exist; password ≥ 8 chars)
+- `POST /api/auth/login` {username, password} → `{token, username, role}`; `POST /api/auth/logout` revokes the token
+- `GET /api/auth/me` → `{username, role, can_write}`; `GET /api/auth/status` → `{setup_required}`
+- All `/api/*` (except login/setup/status) require `Authorization: Bearer <token>`; `/ws/*` takes `?token=`
+- Roles: **admin** (user management), **operator** (everything except user management), **viewer** (GET only — mutations return 403)
+- Admin user management: `GET/POST /api/users`, `PATCH /api/users/{id}` (role, password), `DELETE /api/users/{id}`; last admin can't be demoted or deleted; password change kills other sessions
+- Passwords are bcrypt-hashed; tokens are opaque, revocable, 30-day expiry
+
 - `POST /api/hosts` {name, address, port, username, private_key} → add host (runs ssh-keyscan probe)
 - `GET /api/hosts` → host list (private key never returned)
 - `DELETE /api/hosts/{id}`

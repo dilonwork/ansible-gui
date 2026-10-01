@@ -10,3 +10,4 @@ redis>=5.0
 croniter>=2.0
 cron-descriptor>=1.4
 kubernetes>=28.0
+bcrypt>=4.0

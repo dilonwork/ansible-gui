@@ -66,19 +66,47 @@ export interface JobSummary {
   created_at: number
 }
 
+const TOKEN_KEY = 'drydock_token'
+export const getToken = () => localStorage.getItem(TOKEN_KEY) || ''
+export const setToken = (t: string) => localStorage.setItem(TOKEN_KEY, t)
+export const clearToken = () => localStorage.removeItem(TOKEN_KEY)
+
+const NO_REDIRECT = ['/api/auth/login', '/api/auth/setup', '/api/auth/status', '/api/auth/me']
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(path, {
-    ...init,
-    headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
-  })
+  const headers = new Headers(init?.headers)
+  headers.set('Content-Type', 'application/json')
+  const token = getToken()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  const r = await fetch(path, { ...init, headers })
+  if (r.status === 401 && !NO_REDIRECT.includes(path)) {
+    clearToken()
+    if (!['/login', '/setup'].includes(location.pathname)) location.href = '/login'
+  }
   if (!r.ok) {
     const j = await r.json().catch(() => ({}))
-    throw new Error(j.detail || `HTTP ${r.status}`)
+    const err = new Error(j.detail || `HTTP ${r.status}`) as Error & { status?: number }
+    err.status = r.status
+    throw err
   }
   return r.json()
 }
 
 export const api = {
+  authStatus: () => req<{ setup_required: boolean }>('/api/auth/status'),
+  authSetup: (data: { username: string; password: string }) =>
+    req<{ token: string; username: string; role: string }>('/api/auth/setup', { method: 'POST', body: JSON.stringify(data) }),
+  login: (data: { username: string; password: string }) =>
+    req<{ token: string; username: string; role: string }>('/api/auth/login', { method: 'POST', body: JSON.stringify(data) }),
+  logout: () => req<{ ok: boolean }>('/api/auth/logout', { method: 'POST' }),
+  authMe: () => req<{ username: string; role: string; can_write: boolean }>('/api/auth/me'),
+  listUsers: () => req<UserItem[]>('/api/users'),
+  createUser: (data: { username: string; password: string; role: string }) =>
+    req<UserItem>('/api/users', { method: 'POST', body: JSON.stringify(data) }),
+  updateUser: (id: string, data: { password?: string; role?: string }) =>
+    req<UserItem>(`/api/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteUser: (id: string) => req<{ ok: boolean }>(`/api/users/${id}`, { method: 'DELETE' }),
+
   listHosts: () => req<Host[]>('/api/hosts'),
   addHost: (data: { name: string; address: string; port: number; username: string; private_key: string }) =>
     req<{ id: string }>('/api/hosts', { method: 'POST', body: JSON.stringify(data) }),
@@ -201,6 +229,13 @@ export interface ClusterEvent {
   last_seen: number | null
 }
 
+export interface UserItem {
+  id: string
+  username: string
+  role: string
+  created_at: number
+}
+
 export interface NotifyChannel {
   id: string
   name: string
@@ -235,12 +270,12 @@ export interface ScheduleDetail extends ScheduleItem {
 
 export function maintWsUrl(id: string): string {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  return `${proto}://${location.host}/ws/maintenance/${id}`
+  return `${proto}://${location.host}/ws/maintenance/${id}?token=${encodeURIComponent(getToken())}`
 }
 
 export function jobWsUrl(id: string): string {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  return `${proto}://${location.host}/ws/jobs/${id}`
+  return `${proto}://${location.host}/ws/jobs/${id}?token=${encodeURIComponent(getToken())}`
 }
 
 export interface MaintNodeStep {

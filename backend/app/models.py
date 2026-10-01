@@ -127,3 +127,22 @@ class Cluster(Base):
     last_error = Column(Text, nullable=True)
     last_sync_at = Column(Float, nullable=True)
     created_at = Column(Float)
+
+
+class User(Base):
+    """Local user account (auth/RBAC). Passwords are bcrypt hashes."""
+    __tablename__ = "users"
+    id = Column(String(16), primary_key=True)
+    username = Column(String(64), unique=True, nullable=False)
+    password_hash = Column(String(128), nullable=False)
+    role = Column(String(16), default="operator")  # admin | operator | viewer
+    created_at = Column(Float)
+
+
+class Session(Base):
+    """Opaque login token with expiry; revocable on logout."""
+    __tablename__ = "sessions"
+    token = Column(String(64), primary_key=True)
+    user_id = Column(String(16), nullable=False)
+    created_at = Column(Float)
+    expires_at = Column(Float)
